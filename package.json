@@ -12,5 +12,8 @@
     "client": "npm --prefix client run dev",
     "seed": "npm --prefix server run seed",
     "build": "npm run build --workspace=client"
+  },
+  "overrides": {
+    "rollup": "npm:@rollup/wasm-node@^4.20.0"
   }
 }
