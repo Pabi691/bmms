@@ -326,102 +326,103 @@ export async function buildingSummary(buildingId, month, year, x = db) {
 
   const expected = flats.reduce((s, f) => s + f.monthly_amount, 0);
 
-  const flatStates = await Promise.all(flats.map(async (f) => {
-    const st = await monthState(f.id, month, year, x);
-    const lastPaidOn = await x.prepare(
-      "SELECT MAX(paid_on) d FROM payments WHERE flat_id=? AND month=? AND year=? AND deleted=0"
-    ).get(f.id, month, year);
-    return {
-      id: f.id, number: f.number, owner_name: f.owner_name, resident_name: f.resident_name,
-      monthly_amount: toRupees(f.monthly_amount), paid: toRupees(st.paid + st.advUsed),
-      due: toRupees(st.due), advance: toRupees(st.advBalance), status: st.status,
-      paidOn: lastPaidOn.d || null,
-    };
-  }));
+  const q = (sql, ...a) => x.prepare(sql).get(...a);
+  const mm = String(month).padStart(2, '0');
+  const monthsWindow = [];
+  { let cm = month, cy = year; for (let i = 0; i < 6; i++) { monthsWindow.unshift({ cm, cy }); cm--; if (cm === 0) { cm = 12; cy--; } } }
+
+  // Every query below reads the same building's data but none of them
+  // depend on each other's result, so they're all fired together instead
+  // of one round trip at a time — against a remote database (Turso) each
+  // round trip carries real network latency, and this function used to
+  // rack up ~40 of them sequentially on every Buildings-list/Dashboard
+  // load, which is why those pages felt slow.
+  const [
+    flatStates,
+    totalPaymentsR, totalExpensesR, realExpensesR, fundInR, fundOutR, advTotalR,
+    cashMethodRows, fundInMethodRows, expenseMethodRows, fundOutMethodRows,
+    monthIncomeR, monthExpenseR, settledViaBankMonthR, settledViaCreditMonthR,
+    categoryTotals, societyPaidExpensesR,
+    creditPendingR, creditRejectedR, creditApprovedR, creditAvailableR,
+    series,
+    recentPaymentsRaw, recentExpensesRaw,
+  ] = await Promise.all([
+    Promise.all(flats.map(async (f) => {
+      const st = await monthState(f.id, month, year, x);
+      const lastPaidOn = await x.prepare(
+        "SELECT MAX(paid_on) d FROM payments WHERE flat_id=? AND month=? AND year=? AND deleted=0"
+      ).get(f.id, month, year);
+      return {
+        id: f.id, number: f.number, owner_name: f.owner_name, resident_name: f.resident_name,
+        monthly_amount: toRupees(f.monthly_amount), paid: toRupees(st.paid + st.advUsed),
+        due: toRupees(st.due), advance: toRupees(st.advBalance), status: st.status,
+        paidOn: lastPaidOn.d || null,
+      };
+    })),
+    q('SELECT COALESCE(SUM(amount),0) s FROM payments WHERE building_id=? AND deleted=0', buildingId),
+    q('SELECT COALESCE(SUM(amount),0) s FROM expenses WHERE building_id=? AND deleted=0', buildingId),
+    // Real cash only — an adjustment expense is direct-vendor money that never
+    // touched the society's bank account, so it must not reduce the real cash
+    // position, even though it does count toward totalExpenses below (the
+    // spec's own formula: Total Expenses = Direct Vendor Payments + Society-Paid).
+    q('SELECT COALESCE(SUM(amount),0) s FROM expenses WHERE building_id=? AND deleted=0 AND is_adjustment=0', buildingId),
+    q("SELECT COALESCE(SUM(amount),0) s FROM fund_tx WHERE building_id=? AND type='contribution' AND deleted=0", buildingId),
+    q("SELECT COALESCE(SUM(amount),0) s FROM fund_tx WHERE building_id=? AND type='expense' AND deleted=0", buildingId),
+    q("SELECT COALESCE(SUM(CASE WHEN type='credit' THEN amount ELSE -amount END),0) s FROM advance_tx WHERE building_id=? AND source='bank' AND deleted=0", buildingId),
+    x.prepare('SELECT method, SUM(amount) s FROM payments WHERE building_id=? AND deleted=0 GROUP BY method').all(buildingId),
+    x.prepare("SELECT method, SUM(amount) s FROM fund_tx WHERE building_id=? AND type='contribution' AND deleted=0 GROUP BY method").all(buildingId),
+    x.prepare('SELECT method, SUM(amount) s FROM expenses WHERE building_id=? AND deleted=0 AND is_adjustment=0 GROUP BY method').all(buildingId),
+    x.prepare("SELECT method, SUM(amount) s FROM fund_tx WHERE building_id=? AND type='expense' AND deleted=0 GROUP BY method").all(buildingId),
+    q('SELECT COALESCE(SUM(amount),0) s FROM payments WHERE building_id=? AND month=? AND year=? AND deleted=0', buildingId, month, year),
+    q("SELECT COALESCE(SUM(amount),0) s FROM expenses WHERE building_id=? AND deleted=0 AND strftime('%m', date)=? AND strftime('%Y', date)=?", buildingId, mm, String(year)),
+    // this month's Maintenance settled via bank payment vs. via resident credit
+    q('SELECT COALESCE(SUM(applied_amount),0) s FROM payments WHERE building_id=? AND month=? AND year=? AND deleted=0', buildingId, month, year),
+    q("SELECT COALESCE(SUM(amount),0) s FROM advance_tx WHERE building_id=? AND type='debit' AND source='credit' AND month=? AND year=? AND deleted=0", buildingId, month, year),
+    // lifetime expenses by category — the 8 adjustment categories + society-paid
+    Promise.all(Object.entries(ADJUSTMENT_EXPENSE_MAP).map(([cat, expCat]) =>
+      q('SELECT COALESCE(SUM(amount),0) s FROM expenses WHERE building_id=? AND deleted=0 AND is_adjustment=1 AND category=?', buildingId, expCat)
+        .then((r) => [cat, toRupees(r.s)]))),
+    q('SELECT COALESCE(SUM(amount),0) s FROM expenses WHERE building_id=? AND deleted=0 AND is_adjustment=0', buildingId),
+    // resident credit rollup across the whole building
+    q("SELECT COALESCE(SUM(adjustment_amount),0) s FROM payment_submissions WHERE building_id=? AND status='pending' AND adjustment_amount > 0", buildingId),
+    q("SELECT COALESCE(SUM(adjustment_amount),0) s FROM payment_submissions WHERE building_id=? AND status='rejected' AND adjustment_amount > 0", buildingId),
+    q('SELECT COALESCE(SUM(amount),0) s FROM resident_credits WHERE building_id=? AND deleted=0', buildingId),
+    q("SELECT COALESCE(SUM(CASE WHEN type='credit' THEN amount ELSE -amount END),0) s FROM advance_tx WHERE building_id=? AND source='credit' AND deleted=0", buildingId),
+    // last 6 months income vs expense for the chart
+    Promise.all(monthsWindow.map(({ cm, cy }) =>
+      Promise.all([
+        q('SELECT COALESCE(SUM(amount),0) s FROM payments WHERE building_id=? AND month=? AND year=? AND deleted=0', buildingId, cm, cy),
+        q("SELECT COALESCE(SUM(amount),0) s FROM expenses WHERE building_id=? AND deleted=0 AND strftime('%m', date)=? AND strftime('%Y', date)=?", buildingId, String(cm).padStart(2, '0'), String(cy)),
+      ]).then(([inc, exp]) => ({ label: `${String(cm).padStart(2, '0')}/${String(cy).slice(2)}`, income: toRupees(inc.s), expense: toRupees(exp.s) })))),
+    x.prepare(
+      `SELECT p.*, f.number flat_number FROM payments p JOIN flats f ON f.id=p.flat_id
+       WHERE p.building_id=? AND p.deleted=0 ORDER BY p.created_at DESC LIMIT 6`).all(buildingId),
+    x.prepare('SELECT * FROM expenses WHERE building_id=? AND deleted=0 ORDER BY date DESC, id DESC LIMIT 6').all(buildingId),
+  ]);
 
   const collectedMonth = flatStates.reduce((s, f) => s + f.paid, 0);
   const pendingMonth = flatStates.reduce((s, f) => s + f.due, 0);
 
-  const q = (sql, ...a) => x.prepare(sql).get(...a);
-
-  const totalPayments = (await q('SELECT COALESCE(SUM(amount),0) s FROM payments WHERE building_id=? AND deleted=0', buildingId)).s;
-  const totalExpenses = (await q('SELECT COALESCE(SUM(amount),0) s FROM expenses WHERE building_id=? AND deleted=0', buildingId)).s;
-  // Real cash only — an adjustment expense is direct-vendor money that never
-  // touched the society's bank account, so it must not reduce the real cash
-  // position, even though it does count toward totalExpenses below (the
-  // spec's own formula: Total Expenses = Direct Vendor Payments + Society-Paid).
-  const realExpenses = (await q('SELECT COALESCE(SUM(amount),0) s FROM expenses WHERE building_id=? AND deleted=0 AND is_adjustment=0', buildingId)).s;
-  const fundIn  = (await q("SELECT COALESCE(SUM(amount),0) s FROM fund_tx WHERE building_id=? AND type='contribution' AND deleted=0", buildingId)).s;
-  const fundOut = (await q("SELECT COALESCE(SUM(amount),0) s FROM fund_tx WHERE building_id=? AND type='expense' AND deleted=0", buildingId)).s;
-  const advTotal = (await q(
-    "SELECT COALESCE(SUM(CASE WHEN type='credit' THEN amount ELSE -amount END),0) s FROM advance_tx WHERE building_id=? AND source='bank' AND deleted=0",
-    buildingId)).s;
+  const totalPayments = totalPaymentsR.s, totalExpenses = totalExpensesR.s, realExpenses = realExpensesR.s;
+  const fundIn = fundInR.s, fundOut = fundOutR.s, advTotal = advTotalR.s;
 
   const buckets = { cash: 0, bank: 0, other: 0 };
-  for (const r of await x.prepare('SELECT method, SUM(amount) s FROM payments WHERE building_id=? AND deleted=0 GROUP BY method').all(buildingId))
-    buckets[methodBucket(r.method)] += r.s;
-  for (const r of await x.prepare("SELECT method, SUM(amount) s FROM fund_tx WHERE building_id=? AND type='contribution' AND deleted=0 GROUP BY method").all(buildingId))
-    buckets[methodBucket(r.method)] += r.s;
-  for (const r of await x.prepare('SELECT method, SUM(amount) s FROM expenses WHERE building_id=? AND deleted=0 AND is_adjustment=0 GROUP BY method').all(buildingId))
-    buckets[methodBucket(r.method)] -= r.s;
-  for (const r of await x.prepare("SELECT method, SUM(amount) s FROM fund_tx WHERE building_id=? AND type='expense' AND deleted=0 GROUP BY method").all(buildingId))
-    buckets[methodBucket(r.method)] -= r.s;
+  for (const r of cashMethodRows) buckets[methodBucket(r.method)] += r.s;
+  for (const r of fundInMethodRows) buckets[methodBucket(r.method)] += r.s;
+  for (const r of expenseMethodRows) buckets[methodBucket(r.method)] -= r.s;
+  for (const r of fundOutMethodRows) buckets[methodBucket(r.method)] -= r.s;
 
-  const mm = String(month).padStart(2, '0');
-  const monthIncome = (await q(
-    'SELECT COALESCE(SUM(amount),0) s FROM payments WHERE building_id=? AND month=? AND year=? AND deleted=0',
-    buildingId, month, year)).s;
-  const monthExpense = (await q(
-    "SELECT COALESCE(SUM(amount),0) s FROM expenses WHERE building_id=? AND deleted=0 AND strftime('%m', date)=? AND strftime('%Y', date)=?",
-    buildingId, mm, String(year))).s;
+  const monthIncome = monthIncomeR.s, monthExpense = monthExpenseR.s;
+  const settledViaBankMonth = settledViaBankMonthR.s, settledViaCreditMonth = settledViaCreditMonthR.s;
 
-  // this month's Maintenance settled via bank payment vs. via resident credit
-  const settledViaBankMonth = (await q(
-    'SELECT COALESCE(SUM(applied_amount),0) s FROM payments WHERE building_id=? AND month=? AND year=? AND deleted=0',
-    buildingId, month, year)).s;
-  const settledViaCreditMonth = (await q(
-    "SELECT COALESCE(SUM(amount),0) s FROM advance_tx WHERE building_id=? AND type='debit' AND source='credit' AND month=? AND year=? AND deleted=0",
-    buildingId, month, year)).s;
+  const expensesByCategory = Object.fromEntries(categoryTotals);
+  const societyPaidExpenses = societyPaidExpensesR.s;
 
-  // lifetime expenses by category — the 8 adjustment categories + society-paid
-  const expensesByCategory = {};
-  for (const [cat, expCat] of Object.entries(ADJUSTMENT_EXPENSE_MAP)) {
-    expensesByCategory[cat] = toRupees(
-      (await q('SELECT COALESCE(SUM(amount),0) s FROM expenses WHERE building_id=? AND deleted=0 AND is_adjustment=1 AND category=?', buildingId, expCat)).s
-    );
-  }
-  const societyPaidExpenses = (await q('SELECT COALESCE(SUM(amount),0) s FROM expenses WHERE building_id=? AND deleted=0 AND is_adjustment=0', buildingId)).s;
+  const creditPending = creditPendingR.s, creditRejected = creditRejectedR.s;
+  const creditApproved = creditApprovedR.s, creditAvailable = creditAvailableR.s;
 
-  // resident credit rollup across the whole building
-  const creditPending = (await q(
-    "SELECT COALESCE(SUM(adjustment_amount),0) s FROM payment_submissions WHERE building_id=? AND status='pending' AND adjustment_amount > 0",
-    buildingId)).s;
-  const creditRejected = (await q(
-    "SELECT COALESCE(SUM(adjustment_amount),0) s FROM payment_submissions WHERE building_id=? AND status='rejected' AND adjustment_amount > 0",
-    buildingId)).s;
-  const creditApproved = (await q('SELECT COALESCE(SUM(amount),0) s FROM resident_credits WHERE building_id=? AND deleted=0', buildingId)).s;
-  const creditAvailable = (await q(
-    "SELECT COALESCE(SUM(CASE WHEN type='credit' THEN amount ELSE -amount END),0) s FROM advance_tx WHERE building_id=? AND source='credit' AND deleted=0",
-    buildingId)).s;
-
-  // last 6 months income vs expense for the chart
-  const series = [];
-  let cm = month, cy = year;
-  for (let i = 0; i < 6; i++) {
-    const inc = (await q('SELECT COALESCE(SUM(amount),0) s FROM payments WHERE building_id=? AND month=? AND year=? AND deleted=0', buildingId, cm, cy)).s;
-    const exp = (await q("SELECT COALESCE(SUM(amount),0) s FROM expenses WHERE building_id=? AND deleted=0 AND strftime('%m', date)=? AND strftime('%Y', date)=?",
-      buildingId, String(cm).padStart(2, '0'), String(cy))).s;
-    series.unshift({ label: `${String(cm).padStart(2, '0')}/${String(cy).slice(2)}`, income: toRupees(inc), expense: toRupees(exp) });
-    cm--; if (cm === 0) { cm = 12; cy--; }
-  }
-
-  const recentPayments = (await x.prepare(
-    `SELECT p.*, f.number flat_number FROM payments p JOIN flats f ON f.id=p.flat_id
-     WHERE p.building_id=? AND p.deleted=0 ORDER BY p.created_at DESC LIMIT 6`).all(buildingId))
-    .map((r) => ({ ...r, amount: toRupees(r.amount) }));
-  const recentExpenses = (await x.prepare(
-    'SELECT * FROM expenses WHERE building_id=? AND deleted=0 ORDER BY date DESC, id DESC LIMIT 6').all(buildingId))
-    .map((r) => ({ ...r, amount: toRupees(r.amount) }));
+  const recentPayments = recentPaymentsRaw.map((r) => ({ ...r, amount: toRupees(r.amount) }));
+  const recentExpenses = recentExpensesRaw.map((r) => ({ ...r, amount: toRupees(r.amount) }));
 
   return {
     building: b,

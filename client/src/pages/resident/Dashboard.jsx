@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { api, inr, MONTHS } from '../../api.js';
-import { Layout, Icons, Logo, MoreMenu, StatusChip, residentNavLinks, useToast } from '../../components/ui.jsx';
+import { Layout, Icons, Logo, MoreMenu, StatusChip, residentNavLinks, useToast, DashboardSkeleton } from '../../components/ui.jsx';
 import { useAuth } from '../../auth.jsx';
 
 function greeting() {
@@ -76,7 +76,7 @@ export default function ResidentDashboard() {
     api.get('/me/building-payment-info').then((b) => setBuildingName(b.name)).catch(() => {});
   }, []);
 
-  if (!flat || !month) return <Layout title="Loading…" navOverride={residentNavLinks()} />;
+  if (!flat || !month) return <Layout customHeader={<DashboardSkeleton />} navOverride={residentNavLinks()} />;
 
   const g = greeting();
   const now = new Date();

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { api, inr, MONTHS } from '../api.js';
-import { Layout, useToast, Icons, MoreMenu, Logo } from '../components/ui.jsx';
+import { Layout, useToast, Icons, MoreMenu, Logo, DashboardSkeleton } from '../components/ui.jsx';
 import { useAuth } from '../auth.jsx';
 
 const YEARS = (() => {
@@ -70,7 +70,7 @@ export default function Dashboard() {
     api.get(`/buildings/${buildingId}/payment-submissions?status=pending`).then((rows) => setPendingApprovals(rows.length)).catch(() => {});
   }, [buildingId]);
 
-  if (!s) return <Layout title="Loading…" backTo="/"><div className="empty">Fetching building data…</div></Layout>;
+  if (!s) return <Layout customHeader={<DashboardSkeleton />} />;
   const t = s.totals;
   const paidCount = s.flatStates.filter((f) => f.status === 'paid').length;
   const partCount = s.flatStates.filter((f) => f.status === 'partial').length;

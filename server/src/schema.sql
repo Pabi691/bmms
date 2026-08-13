@@ -3,6 +3,15 @@
 
 PRAGMA foreign_keys = ON;
 
+-- Tracks whether schema.sql + migrate.js have already been applied to this
+-- database, so a fresh serverless cold start can skip straight past both
+-- (one cheap SELECT) instead of re-running ~18 round trips of CREATE/ALTER
+-- statements against the remote database on every single cold start.
+CREATE TABLE IF NOT EXISTS _schema_meta (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS buildings (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   name          TEXT NOT NULL,

@@ -60,9 +60,22 @@ db.transaction = async () => {
 };
 
 // ---- schema bootstrap (idempotent, same as before) ----
-const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
-await client.executeMultiple(schema);
-await runMigrations(db);
+// Bump this whenever schema.sql or migrate.js's MIGRATIONS array changes —
+// that's the only thing that forces a re-run. Without it, every cold start
+// of the serverless function re-executed the full schema plus ~17
+// sequential migration-check round trips against Turso before it could
+// serve even one request, which is why the deployed app felt slow to load.
+const SCHEMA_VERSION = '1';
+const versionRow = await client.execute("SELECT value FROM _schema_meta WHERE key='schema_version'").catch(() => null);
+if (versionRow?.rows[0]?.value !== SCHEMA_VERSION) {
+  const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
+  await client.executeMultiple(schema);
+  await runMigrations(db);
+  await client.execute({
+    sql: "INSERT INTO _schema_meta (key, value) VALUES ('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    args: [SCHEMA_VERSION],
+  });
+}
 
 // ---- money helpers: rupees (API) <-> paise (DB) ----
 export const toPaise = (v) => {

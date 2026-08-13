@@ -291,3 +291,79 @@ export function StatusChip({ status, advance }) {
 export function Empty({ title, hint }) {
   return <div className="empty glass"><b>{title}</b>{hint}</div>;
 }
+
+/* ---------- dashboard-v2 skeleton (Dashboard.jsx / resident Dashboard.jsx) ----------
+   Mirrors the dhh-/dh-* layout shape so the page's structure is visible
+   immediately and only the numbers "pop in" once data arrives, instead of
+   a blank page flashing to a full layout all at once. */
+const Skel = ({ w, h, r = 6, style }) => <span className="skel" style={{ width: w, height: h, borderRadius: r, ...style }} />;
+
+export function DashboardSkeleton() {
+  return (
+    <>
+      <div className="dhh">
+        <div className="dhh-row">
+          <div className="dhh-brand">
+            <Skel w={34} h={34} r={8} />
+            <span className="dhh-divider" />
+            <div>
+              <Skel w={140} h={16} style={{ display: 'block', marginBottom: 6 }} />
+              <Skel w={90} h={11} style={{ display: 'block' }} />
+            </div>
+          </div>
+          <Skel w={200} h={16} />
+          <div className="dhh-actions">
+            <Skel w={120} h={38} r={999} />
+            <Skel w={42} h={42} r={999} />
+            <Skel w={42} h={42} r={999} />
+          </div>
+        </div>
+      </div>
+
+      <div className="dh-hero-row">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="dh-hero-card">
+            <Skel w={56} h={56} r={999} style={{ marginBottom: 16 }} />
+            <Skel w={110} h={12} style={{ display: 'block', marginBottom: 10 }} />
+            <Skel w={120} h={26} style={{ display: 'block', marginBottom: 8 }} />
+            <Skel w={140} h={11} style={{ display: 'block' }} />
+          </div>
+        ))}
+      </div>
+
+      <div className="glass dh-flatwise">
+        <Skel w={220} h={16} style={{ display: 'block', marginBottom: 18 }} />
+        <Skel w="100%" h={14} r={999} style={{ display: 'block' }} />
+      </div>
+
+      <div className="dh-mini-row">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="dh-mini-card">
+            <Skel w={42} h={42} r={999} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <Skel w="70%" h={10} style={{ display: 'block', marginBottom: 7 }} />
+              <Skel w="50%" h={14} style={{ display: 'block' }} />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="dh-lists-row">
+        {[0, 1].map((i) => (
+          <div key={i} className="glass dh-list-card">
+            <Skel w={160} h={16} style={{ display: 'block', marginBottom: 18 }} />
+            {[0, 1, 2].map((j) => (
+              <div key={j} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0' }}>
+                <Skel w={36} h={36} r={999} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <Skel w="55%" h={12} style={{ display: 'block', marginBottom: 6 }} />
+                  <Skel w="35%" h={10} style={{ display: 'block' }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}

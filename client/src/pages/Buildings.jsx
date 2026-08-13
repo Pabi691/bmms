@@ -108,6 +108,31 @@ export default function Buildings() {
         <Empty title="No buildings match" hint="Try a different search or switch the filter back to All buildings." />
       ))}
 
+      {!list && (
+        <div className="grid cards">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="glass building-card">
+              <div className="bc-head">
+                <span className="skel" style={{ width: 44, height: 44, borderRadius: 12 }} />
+                <div className="bc-name-block" style={{ flex: 1 }}>
+                  <span className="skel" style={{ width: '60%', height: 15, borderRadius: 6, display: 'block', marginBottom: 8 }} />
+                  <span className="skel" style={{ width: '40%', height: 11, borderRadius: 6, display: 'block' }} />
+                </div>
+              </div>
+              <div className="bc-stats">
+                {[0, 1, 2, 3].map((j) => (
+                  <div key={j}>
+                    <span className="skel" style={{ width: '80%', height: 10, borderRadius: 6, display: 'block', marginBottom: 8 }} />
+                    <span className="skel" style={{ width: '55%', height: 14, borderRadius: 6, display: 'block' }} />
+                  </div>
+                ))}
+              </div>
+              <span className="skel" style={{ width: '100%', height: 34, borderRadius: 10, display: 'block', marginTop: 14 }} />
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="grid cards">
         {filtered.map((b, i) => {
           const accent = ACCENTS[i % ACCENTS.length];
