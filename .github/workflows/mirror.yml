@@ -1,58 +1,37 @@
-name: Mirror from joydip repo (build-gated)
+name: Mirror to Pabi691/bmms (push-triggered)
 
-# Polls joydipghosh55-jpg/bmms on a schedule and, only if there are new
-# commits AND they build successfully, merges and pushes them into this
-# repo's main — which is what actually triggers the live Vercel deploy.
-# A push-triggered mirror isn't possible here since we don't have admin
-# access on the source repo to register a webhook/secret there; polling
-# from this side only needs read access we already have.
+# Runs on every push to main. Only does anything when executing inside
+# joydipghosh55-jpg/bmms (the `if:` guard below) — this same file also
+# exists in Pabi691/bmms via the dual-push setup, but there's nothing
+# for it to do there, so it no-ops instead of failing.
+#
+# Builds first as a safety gate: if the code doesn't build, nothing gets
+# pushed to Pabi691/bmms, so a broken push here never reaches the live
+# Vercel deploy automatically.
 
 on:
-  schedule:
-    - cron: '*/15 * * * *'
+  push:
+    branches: [main]
   workflow_dispatch: {}
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   mirror:
+    if: github.repository == 'joydipghosh55-jpg/bmms'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout this repo
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Configure git identity
-        run: |
-          git config user.name "mirror-bot"
-          git config user.email "actions@github.com"
-
-      - name: Fetch source repo
-        run: git fetch "https://x-access-token:${{ secrets.JOYDIP_REPO_TOKEN }}@github.com/joydipghosh55-jpg/bmms.git" main:joydip-main
-
-      - name: Check for new commits
-        id: check
-        run: |
-          if git merge-base --is-ancestor joydip-main main; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Merge source changes
-        if: steps.check.outputs.changed == 'true'
-        run: git merge --no-edit joydip-main
-
       - name: Install dependencies
-        if: steps.check.outputs.changed == 'true'
         run: npm install
 
       - name: Build (safety gate — nothing pushes if this fails)
-        if: steps.check.outputs.changed == 'true'
         run: npm run build
 
-      - name: Push to main (triggers the live Vercel deploy)
-        if: steps.check.outputs.changed == 'true'
-        run: git push origin main
+      - name: Push to Pabi691/bmms (triggers the live Vercel deploy)
+        run: git push "https://x-access-token:${{ secrets.PABI_REPO_TOKEN }}@github.com/Pabi691/bmms.git" HEAD:main
