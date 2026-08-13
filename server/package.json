@@ -10,8 +10,9 @@
     "seed:demo-users": "node src/seedDemoUsers.js"
   },
   "dependencies": {
+    "@libsql/client": "^0.14.0",
+    "@vercel/blob": "^0.27.1",
     "bcryptjs": "^3.0.3",
-    "better-sqlite3": "^11.10.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",

@@ -3,7 +3,10 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { ToastProvider } from './components/ui.jsx';
 import { AuthProvider, useAuth } from './auth.jsx';
 import { RequireAuth, Guard } from './components/guards.jsx';
-import Login from './pages/Login.jsx';
+import LoginGateway from './pages/LoginGateway.jsx';
+import MasterLogin from './pages/MasterLogin.jsx';
+import BuildingLogin from './pages/BuildingLogin.jsx';
+import FlatLogin from './pages/FlatLogin.jsx';
 import ChangePassword from './pages/ChangePassword.jsx';
 import Buildings from './pages/Buildings.jsx';
 import Dashboard from './pages/Dashboard.jsx';
@@ -17,6 +20,7 @@ import Notices from './pages/Notices.jsx';
 import PaymentApprovals from './pages/PaymentApprovals.jsx';
 import ResidentDashboard from './pages/resident/Dashboard.jsx';
 import PayMaintenance from './pages/resident/PayMaintenance.jsx';
+import Credits from './pages/resident/Credits.jsx';
 import MyLedger from './pages/resident/MyLedger.jsx';
 import Receipts from './pages/resident/Receipts.jsx';
 import ResidentNotices from './pages/resident/Notices.jsx';
@@ -39,7 +43,10 @@ export default function App() {
     <AuthProvider>
       <ToastProvider>
         <Routes>
-          <Route path="/login" element={<Login />} />
+          <Route path="/login" element={<LoginGateway />} />
+          <Route path="/login/master" element={<MasterLogin />} />
+          <Route path="/login/building" element={<BuildingLogin />} />
+          <Route path="/login/flat" element={<FlatLogin />} />
           <Route path="/change-password" element={<RequireAuth><ChangePassword /></RequireAuth>} />
           <Route path="/" element={<Home />} />
 
@@ -60,6 +67,7 @@ export default function App() {
           {/* resident */}
           <Route path="/me" element={<Guard roles={['resident']}><ResidentDashboard /></Guard>} />
           <Route path="/me/pay" element={<Guard roles={['resident']}><PayMaintenance /></Guard>} />
+          <Route path="/me/credits" element={<Guard roles={['resident']}><Credits /></Guard>} />
           <Route path="/me/ledger" element={<Guard roles={['resident']}><MyLedger /></Guard>} />
           <Route path="/me/receipts" element={<Guard roles={['resident']}><Receipts /></Guard>} />
           <Route path="/me/notices" element={<Guard roles={['resident']}><ResidentNotices /></Guard>} />

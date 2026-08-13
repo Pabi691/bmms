@@ -29,11 +29,14 @@ export default function Flats() {
     return m;
   }, [residents]);
 
+  const openEdit = (f) => setForm({ ...blank, ...f });
+
   const save = async (e) => {
     e.preventDefault();
     try {
-      if (form.id) { await api.put(`/flats/${form.id}`, form); toast('Flat updated'); }
-      else { await api.post(`/buildings/${buildingId}/flats`, form); toast('Flat added'); }
+      if (form.id) { await api.put(`/flats/${form.id}`, form); }
+      else { await api.post(`/buildings/${buildingId}/flats`, form); }
+      toast(form.id ? 'Flat updated' : 'Flat added');
       setForm(null); params.delete('add'); setParams(params); load();
     } catch (err) { toast(err.message); }
   };
@@ -59,9 +62,13 @@ export default function Flats() {
     return l;
   }, [flats, q, filter, sort]);
 
+  const STATUS_TONE = { paid: 'b-ok', partial: 'b-warn', due: 'b-bad' };
+
   return (
     <Layout title="Flats" sub="Residents, monthly amounts and current status" backTo={`/b/${buildingId}`}
-      actions={<button className="btn primary" onClick={() => setForm({ ...blank })}>+ Add flat</button>}>
+      actions={<button className="btn primary" onClick={() => setForm({ ...blank })}>{Icons.building} + Add flat</button>}
+      headerIcon={Icons.building}
+      mobileExtra={<button className="btn primary sm" onClick={() => setForm({ ...blank })}>{Icons.building} + Add flat</button>}>
 
       <div className="searchbar">
         <input placeholder="Search flat, owner or resident…" value={q} onChange={(e) => setQ(e.target.value)} />
@@ -99,7 +106,7 @@ export default function Flats() {
                 <td className="t-right" style={{ whiteSpace: 'nowrap' }}>
                   <Link className="btn sm icon-only" to={`/b/${buildingId}/flats/${f.id}/ledger`} data-label="Ledger" aria-label="Ledger">{Icons.ledger}</Link>{' '}
                   <button className="btn sm icon-only" onClick={() => setLoginFlat(f)} data-label="Resident login" aria-label="Resident login">{Icons.user}</button>{' '}
-                  <button className="btn sm icon-only" onClick={() => setForm({ ...blank, ...f })} data-label="Edit" aria-label="Edit">{Icons.edit}</button>{' '}
+                  <button className="btn sm icon-only" onClick={() => openEdit(f)} data-label="Edit" aria-label="Edit">{Icons.edit}</button>{' '}
                   <button className="btn sm icon-only danger" onClick={() => archive(f)} data-label="Archive" aria-label="Archive">{Icons.archive}</button>{' '}
                   <button className="btn sm icon-only danger" onClick={() => remove(f)} data-label="Delete" aria-label="Delete">{Icons.trash}</button>
                 </td>
@@ -114,7 +121,10 @@ export default function Flats() {
         {list.map((f) => (
           <div key={f.id} className="glass rowcard card-hover">
             <div className="rc-top">
-              <span className="rc-title">{f.number} <span className="mut">· {f.owner_name || f.resident_name || '—'}</span></span>
+              <span className="rc-title-block">
+                <span className={'icon-badge sm ' + (STATUS_TONE[f.status] || 'b-adv')}>{Icons.building}</span>
+                <span className="rc-title">{f.number} <span className="mut">· {f.owner_name || f.resident_name || '—'}</span></span>
+              </span>
               <StatusChip status={f.status} advance={f.advance} />
             </div>
             <div className="rc-meta num">
@@ -125,7 +135,7 @@ export default function Flats() {
             <div style={{ display: 'flex', gap: 8 }}>
               <Link className="btn sm icon-only" to={`/b/${buildingId}/flats/${f.id}/ledger`} data-label="Ledger" aria-label="Ledger">{Icons.ledger}</Link>
               <button className="btn sm icon-only" onClick={() => setLoginFlat(f)} data-label="Resident login" aria-label="Resident login">{Icons.user}</button>
-              <button className="btn sm icon-only" onClick={() => setForm({ ...blank, ...f })} data-label="Edit" aria-label="Edit">{Icons.edit}</button>
+              <button className="btn sm icon-only" onClick={() => openEdit(f)} data-label="Edit" aria-label="Edit">{Icons.edit}</button>
               <button className="btn sm icon-only danger" onClick={() => archive(f)} data-label="Archive" aria-label="Archive">{Icons.archive}</button>
               <button className="btn sm icon-only danger" onClick={() => remove(f)} data-label="Delete" aria-label="Delete">{Icons.trash}</button>
             </div>
@@ -160,6 +170,7 @@ export default function Flats() {
               <div className="field"><label>Notes</label>
                 <input value={form.notes || ''} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></div>
             </div>
+
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
               <button type="button" className="btn" onClick={() => setForm(null)}>Cancel</button>
               <button className="btn primary">{form.id ? 'Save changes' : 'Add flat'}</button>

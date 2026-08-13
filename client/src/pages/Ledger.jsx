@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../api.js';
-import { Layout, useToast } from '../components/ui.jsx';
+import { Layout, useToast, Icons } from '../components/ui.jsx';
 import LedgerView from '../components/LedgerView.jsx';
 
 export default function Ledger() {
@@ -16,7 +16,7 @@ export default function Ledger() {
   if (!data) return <Layout title="Loading…" backTo={`/b/${buildingId}/flats`} />;
 
   return (
-    <Layout title={`Flat ${data.flat.number} · ledger`} sub={data.flat.owner_name || data.flat.resident_name || 'Complete financial history'} backTo={`/b/${buildingId}/flats`}>
+    <Layout title={`Flat ${data.flat.number} · ledger`} sub={data.flat.owner_name || data.flat.resident_name || 'Complete financial history'} backTo={`/b/${buildingId}/flats`} headerIcon={Icons.ledger}>
       <LedgerView data={data} />
     </Layout>
   );

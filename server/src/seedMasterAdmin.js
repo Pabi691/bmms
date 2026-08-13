@@ -7,7 +7,7 @@ import { hashPassword } from './services/auth.js';
 // install always has a way to log in — without silently creating a
 // predictable default account when the operator forgot to set env vars.
 export async function ensureMasterAdmin() {
-  const existing = db.prepare("SELECT id FROM users WHERE role='master_admin'").get();
+  const existing = await db.prepare("SELECT id FROM users WHERE role='master_admin'").get();
   if (existing) return;
 
   const username = process.env.MASTER_ADMIN_USERNAME;
@@ -22,10 +22,10 @@ export async function ensureMasterAdmin() {
   }
 
   const hash = await hashPassword(password);
-  const info = db.prepare(
+  const info = await db.prepare(
     `INSERT INTO users (role, username, password_hash, full_name, must_change_password)
      VALUES ('master_admin', ?, ?, 'Master Admin', 0)`
   ).run(username, hash);
-  audit(null, 'create', 'user', info.lastInsertRowid, `Master Admin account "${username}" created`);
+  await audit(null, 'create', 'user', info.lastInsertRowid, `Master Admin account "${username}" created`);
   console.log(`[auth] Master Admin account "${username}" created.`);
 }

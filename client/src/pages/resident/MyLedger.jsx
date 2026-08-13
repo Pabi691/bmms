@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../../api.js';
-import { Layout, useToast, residentNavLinks } from '../../components/ui.jsx';
+import { Layout, useToast, residentNavLinks, Icons } from '../../components/ui.jsx';
 import LedgerView from '../../components/LedgerView.jsx';
 
 export default function MyLedger() {
@@ -14,7 +14,7 @@ export default function MyLedger() {
   if (!data) return <Layout title="Loading…" navOverride={residentNavLinks()} />;
 
   return (
-    <Layout title={`Flat ${data.flat.number} · ledger`} sub="Your complete financial history" navOverride={residentNavLinks()}>
+    <Layout title={`Flat ${data.flat.number} · ledger`} sub="Your complete financial history" navOverride={residentNavLinks()} headerIcon={Icons.ledger}>
       <LedgerView data={data} />
     </Layout>
   );

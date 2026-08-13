@@ -30,7 +30,9 @@ export default function Notices() {
 
   return (
     <Layout title="Notices" sub="Announcements visible to all residents" backTo={`/b/${buildingId}`}
-      actions={<button className="btn primary" onClick={() => setForm({ ...blank })}>+ New notice</button>}>
+      actions={<button className="btn primary" onClick={() => setForm({ ...blank })}>{Icons.bell} + New notice</button>}
+      headerIcon={Icons.bell}
+      mobileExtra={<button className="btn primary sm" onClick={() => setForm({ ...blank })}>{Icons.bell} + New notice</button>}>
 
       {notices && notices.length === 0 && <Empty title="No notices yet" hint="Post an announcement for residents to see." />}
 
@@ -38,13 +40,16 @@ export default function Notices() {
         {(notices || []).map((n) => (
           <div key={n.id} className="glass" style={{ padding: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-              <div>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <strong style={{ fontSize: 16 }}>{n.title}</strong>
-                  {n.pinned && <span className="chip advance">Pinned</span>}
-                </span>
-                <div className="mut" style={{ marginTop: 6, whiteSpace: 'pre-wrap' }}>{n.body}</div>
-                <div className="mut" style={{ marginTop: 6, fontSize: 12 }}>{n.createdAt?.slice(0, 10)}</div>
+              <div style={{ display: 'flex', gap: 12 }}>
+                <div className={'icon-badge ' + (n.pinned ? 'b-warn' : 'b-adv')} style={{ flexShrink: 0 }}>{Icons.bell}</div>
+                <div>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <strong style={{ fontSize: 16 }}>{n.title}</strong>
+                    {n.pinned && <span className="chip advance">Pinned</span>}
+                  </span>
+                  <div className="mut" style={{ marginTop: 6, whiteSpace: 'pre-wrap' }}>{n.body}</div>
+                  <div className="mut" style={{ marginTop: 6, fontSize: 12 }}>{n.createdAt?.slice(0, 10)}</div>
+                </div>
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button className="btn sm icon-only" onClick={() => setForm(n)} data-label="Edit" aria-label="Edit">{Icons.edit}</button>

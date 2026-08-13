@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api, inr, MONTHS } from '../api.js';
-import { Layout, Modal, Empty, useToast } from '../components/ui.jsx';
+import { Layout, Modal, Empty, useToast, Icons } from '../components/ui.jsx';
 
 const statusChip = { pending: ['partial', 'Pending'], approved: ['paid', 'Approved'], rejected: ['due', 'Rejected'] };
+const STATUS_TONE = { pending: 'b-warn', approved: 'b-ok', rejected: 'b-bad' };
+const ADJUSTMENT_LABELS = { electricity: 'Electricity', internet: 'Internet', water: 'Water', sweeper: 'Sweeper', security: 'Security', cleaning: 'Cleaning', generator: 'Generator', custom: 'Custom' };
 
 export default function PaymentApprovals() {
   const { buildingId } = useParams();
@@ -18,10 +20,13 @@ export default function PaymentApprovals() {
   useEffect(() => { load(); }, [buildingId, filter]);
 
   const approve = async (s) => {
-    if (!confirm(`Approve ₹${s.amount} for flat ${s.flatNumber}? This will record it as a real payment.`)) return;
+    if (!confirm(`Approve ₹${s.amount} for flat ${s.flatNumber}? This will record the bank payment and/or resident credit adjustment.`)) return;
     try {
       const r = await api.post(`/payment-submissions/${s.id}/approve`);
-      toast(r.cascade?.length ? `Approved — extra amount auto-applied to ${r.cascade.length} future month(s)` : 'Approved');
+      const parts = [];
+      if (r.payment?.cascade?.length) parts.push(`bank overpayment auto-applied to ${r.payment.cascade.length} future month(s)`);
+      if (r.credit?.cascade?.length) parts.push(`credit auto-applied to ${r.credit.cascade.length} month(s)`);
+      toast(parts.length ? `Approved — ${parts.join('; ')}` : 'Approved');
       load();
     } catch (err) { toast(err.message); }
   };
@@ -35,7 +40,7 @@ export default function PaymentApprovals() {
   };
 
   return (
-    <Layout title="Payment approvals" sub="Review resident-submitted payment proofs" backTo={`/b/${buildingId}`}>
+    <Layout title="Payment approvals" sub="Review resident-submitted payment proofs" backTo={`/b/${buildingId}`} headerIcon={Icons.check}>
       <div className="searchbar">
         <select value={filter} onChange={(e) => setFilter(e.target.value)}>
           <option value="pending">Pending</option>
@@ -52,9 +57,18 @@ export default function PaymentApprovals() {
           return (
             <div key={s.id} className="glass" style={{ padding: 14 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: 12 }}>
+                <div className={'icon-badge ' + STATUS_TONE[s.status]} style={{ flexShrink: 0 }}>{Icons.receipt}</div>
                 <div>
                   <strong>Flat {s.flatNumber}</strong> <span className="mut">· {MONTHS[s.month - 1]} {s.year} · {s.method}</span>
                   <div className="mut" style={{ fontSize: 12 }}>Submitted {s.createdAt?.slice(0, 10)}{s.transactionRef ? ` · ref ${s.transactionRef}` : ''}</div>
+                  {s.adjustmentCategory && (
+                    <div className="mut" style={{ fontSize: 12, marginTop: 4 }}>
+                      Bank {inr(s.bankAmount)} · {ADJUSTMENT_LABELS[s.adjustmentCategory] || s.adjustmentCategory}
+                      {s.adjustmentCustomTitle ? ` — ${s.adjustmentCustomTitle}` : ''} adjustment {inr(s.adjustmentAmount)}
+                    </div>
+                  )}
+                </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <strong className="num">{inr(s.amount)}</strong>

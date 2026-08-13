@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { api, inr, MONTHS } from '../../api.js';
-import { Layout, Modal, useToast, residentNavLinks } from '../../components/ui.jsx';
+import { Layout, Modal, useToast, residentNavLinks, Icons } from '../../components/ui.jsx';
 
 export default function Receipts() {
   const [payments, setPayments] = useState(null);
@@ -16,14 +16,17 @@ export default function Receipts() {
   if (!payments) return <Layout title="Loading…" navOverride={residentNavLinks()} />;
 
   return (
-    <Layout title="Receipts" sub="Every approved payment on your account" navOverride={residentNavLinks()}>
+    <Layout title="Receipts" sub="Every approved payment on your account" navOverride={residentNavLinks()} headerIcon={Icons.receipt}>
       {payments.length === 0 && <div className="glass mut" style={{ padding: 18 }}>No payments recorded yet.</div>}
       <div className="list">
         {payments.map((p) => (
           <div key={p.id} className="glass rowcard" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexDirection: 'row' }}>
-            <div>
-              <strong>{MONTHS[p.month - 1]} {p.year}</strong>
-              <div className="mut">{p.paid_on} · {p.method}</div>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+              <span className="icon-badge sm b-ok">{Icons.receipt}</span>
+              <div>
+                <strong>{MONTHS[p.month - 1]} {p.year}</strong>
+                <div className="mut">{p.paid_on} · {p.method}</div>
+              </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <strong className="num" style={{ color: 'var(--ok)' }}>{inr(p.amount)}</strong>

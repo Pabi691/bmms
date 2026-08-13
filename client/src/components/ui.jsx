@@ -1,6 +1,21 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
 import { NavLink, useParams, Link } from 'react-router-dom';
 import { useAuth } from '../auth.jsx';
+import logoDark from '../assets/logo-dark.webp';
+import logoLight from '../assets/logo-light.webp';
+import heroBuilding from '../assets/hero-building.webp';
+import heroBuildingLight from '../assets/hero-building-light.webp';
+
+/* theme-aware logo — both variants render, CSS shows/hides by
+   html[data-theme] so it swaps instantly with the toggle, no re-render */
+export function Logo({ className = '', alt = 'Ledgix', style }) {
+  return (
+    <>
+      <img src={logoDark} alt={alt} className={className + ' logo-img for-dark'} style={style} />
+      <img src={logoLight} alt={alt} className={className + ' logo-img for-light'} style={style} />
+    </>
+  );
+}
 
 /* ---------- minimal inline icon set ---------- */
 const I = ({ d }) => (
@@ -31,6 +46,16 @@ export const Icons = {
   user: <I d="M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9zM4 21c0-4.4 3.6-8 8-8s8 3.6 8 8" />,
   logout: <I d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />,
   cog: <I d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 12a7.4 7.4 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-2-1.2L14.5 3h-5l-.4 2.6c-.7.3-1.4.7-2 1.2l-2.4-1-2 3.4 2 1.6a7.4 7.4 0 0 0 0 2.4l-2 1.6 2 3.4 2.4-1c.6.5 1.3.9 2 1.2l.4 2.6h5l.4-2.6c.7-.3 1.4-.7 2-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2z" />,
+  filter: <I d="M4 6h16M8 12h8M11 18h2" />,
+  users: <I d="M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3 21v-1a5 5 0 0 1 5-5h2a5 5 0 0 1 5 5v1M17 11a3 3 0 1 0 0-6M21 21v-1a5 5 0 0 0-4-4.9" />,
+  bank: <I d="M3 10l9-6 9 6M4 10v10M20 10v10M8 10v10M16 10v10M2 21h20" />,
+  card: <I d="M2 6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2zM2 10h20" />,
+  more: <I d="M12 5v.01M12 12v.01M12 19v.01" />,
+  chevronRight: <I d="M9 5l7 7-7 7" />,
+  calendar: <I d="M7 2v3M17 2v3M3.5 8h17M4 5h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z" />,
+  trendUp: <I d="M3 17l6-6 4 4 8-8M15 7h6v6" />,
+  clock: <I d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3.5 2" />,
+  download: <I d="M12 3v12m0 0-4-4m4 4 4-4M4 21h16" />,
 };
 
 /* ---------- toast ---------- */
@@ -51,7 +76,29 @@ export function ToastProvider({ children }) {
 }
 
 /* ---------- theme toggle ---------- */
-export function ThemeToggle({ compact }) {
+const WAVE_COLOR = { 'b-ok': 'var(--ok)', 'b-bad': 'var(--bad)', 'b-adv': 'var(--adv)', 'b-warn': 'var(--warn)', 'b-credit': '#a78bfa' };
+
+// purely decorative accent (not a real trend line — see styles.css note by .hs-wave)
+export function Wave({ tone }) {
+  return (
+    <svg className="hs-wave" viewBox="0 0 100 20" preserveAspectRatio="none" aria-hidden="true">
+      <path d="M0 13 Q12 5 25 12 T50 9 T75 14 T100 7" fill="none" stroke={WAVE_COLOR[tone]} strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// static skyline accent for hero cards — no motion, matches the app's
+// existing blue palette; kept deliberately understated
+export function CityIllustration() {
+  return (
+    <>
+      <img src={heroBuilding} alt="" className="hero-illustration logo-img for-dark" aria-hidden="true" />
+      <img src={heroBuildingLight} alt="" className="hero-illustration logo-img for-light" aria-hidden="true" />
+    </>
+  );
+}
+
+export function ThemeToggle({ compact, icon }) {
   const [theme, setTheme] = useState(document.documentElement.dataset.theme);
   const flip = () => {
     const next = theme === 'dark' ? 'light' : 'dark';
@@ -61,6 +108,7 @@ export function ThemeToggle({ compact }) {
   };
   return (
     <button className={'switch' + (theme === 'dark' ? ' on' : '')} onClick={flip} aria-label="Switch theme" data-label="Switch theme">
+      {icon && <span className="sw-icon">{theme === 'dark' ? Icons.moon : Icons.sun}</span>}
       <span className="track" />
       {!compact && <span className="sw-label">{theme === 'dark' ? 'Dark' : 'Light'}</span>}
     </button>
@@ -92,14 +140,34 @@ export function RadialGauge({ percent = 0, size = 128, stroke = 12, color = 'var
 export const residentNavLinks = () => [
   { to: '/me', label: 'Dashboard', icon: Icons.home, end: true },
   { to: '/me/pay', label: 'Pay maintenance', icon: Icons.rupee, short: 'Pay' },
+  { to: '/me/credits', label: 'My credits', icon: Icons.sheet, short: 'Credits' },
   { to: '/me/ledger', label: 'My ledger', icon: Icons.ledger, short: 'Ledger' },
   { to: '/me/receipts', label: 'Receipts', icon: Icons.receipt },
   { to: '/me/notices', label: 'Notices', icon: Icons.bell },
   { to: '/me/profile', label: 'Profile', icon: Icons.user },
 ];
 
+/* self-contained "more actions" menu button — owns its own open/close state
+   so callers just pass items, no state wiring needed per page */
+export function MoreMenu({ items, icon, label = 'More', triggerClassName = 'btn sm icon-only' }) {
+  const [open, setOpen] = useState(false);
+  if (!items || items.length === 0) return null;
+  return (
+    <div className="dbh-more-wrap" tabIndex={-1} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setOpen(false); }}>
+      <button className={triggerClassName} onClick={() => setOpen((o) => !o)} data-label={label} aria-label={label} aria-expanded={open}>{icon || Icons.more}</button>
+      {open && (
+        <div className="filter-menu">
+          {items.map((it, i) => (
+            <button key={i} onClick={() => { setOpen(false); it.onClick(); }}>{it.label}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ---------- layout with sidebar (desktop) + bottom nav (mobile) ---------- */
-export function Layout({ children, title, sub, actions, backTo, navOverride }) {
+export function Layout({ children, title, sub, actions, backTo, navOverride, mobileHeader, headerIcon, more, mobileExtra, customHeader }) {
   const { buildingId } = useParams();
   const { logout } = useAuth();
   const links = navOverride || (buildingId
@@ -117,6 +185,28 @@ export function Layout({ children, title, sub, actions, backTo, navOverride }) {
   // separate from the `backTo` topbar button below — this sidebar link exits
   // the building context entirely, back to the buildings list.
   const showBuildingsLink = buildingId && !navOverride;
+
+  // standard mobile header (avatar + title/sub + theme toggle + more-menu),
+  // built automatically whenever a page passes `headerIcon` — pass an
+  // explicit `mobileHeader` instead for a fully custom layout (e.g. Buildings.jsx)
+  const autoMobileHeader = headerIcon ? (
+    <>
+      <div className="dbh-row1">
+        {backTo && <Link to={backTo} className="btn sm icon-only" aria-label="Back" data-label="Back">{Icons.back}</Link>}
+        <div className="dbh-avatar">{headerIcon}</div>
+        <div className="dbh-name-block">
+          <h1>{title}</h1>
+          {sub && <div className="sub">{sub}</div>}
+        </div>
+        <div className="dbh-toggle-row">
+          <ThemeToggle compact icon />
+          <MoreMenu items={more} />
+        </div>
+      </div>
+      {mobileExtra && <div className="dbh-row2">{mobileExtra}</div>}
+    </>
+  ) : null;
+  const effectiveMobileHeader = mobileHeader || autoMobileHeader;
 
   return (
     <div className="shell">
@@ -140,19 +230,27 @@ export function Layout({ children, title, sub, actions, backTo, navOverride }) {
       </aside>
 
       <main className="main">
-        <div className="topbar">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-            {backTo && <Link to={backTo} className="btn sm" aria-label="Back">{Icons.back}</Link>}
-            <div style={{ minWidth: 0 }}>
-              <h1 style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</h1>
-              {sub && <div className="sub">{sub}</div>}
+        {customHeader ? customHeader : (
+          <>
+            <div className={'topbar' + (effectiveMobileHeader ? ' has-mobile-alt' : '')}>
+              <div className="topbar-left" style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0 }}>
+                <Link to="/" className="topbar-logo-link" aria-label="Society Ledger">
+                  <Logo className="topbar-logo-img" />
+                </Link>
+                {backTo && <Link to={backTo} className="btn sm" aria-label="Back">{Icons.back}</Link>}
+                <div style={{ minWidth: 0 }}>
+                  <h1 style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</h1>
+                  {sub && <div className="sub">{sub}</div>}
+                </div>
+              </div>
+              <div className="topbar-right" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <span className="mobile-theme"><ThemeToggle /></span>
+                {actions}
+              </div>
             </div>
-          </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <span className="mobile-theme"><ThemeToggle /></span>
-            {actions}
-          </div>
-        </div>
+            {effectiveMobileHeader && <div className="topbar-mobile">{effectiveMobileHeader}</div>}
+          </>
+        )}
         {children}
       </main>
 

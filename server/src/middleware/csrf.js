@@ -7,9 +7,9 @@ const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 export function verifyOrigin(req, res, next) {
   if (SAFE_METHODS.has(req.method)) return next();
-  const allowed = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
+  const allowed = (process.env.CLIENT_ORIGIN || 'http://localhost:5173').split(',').map((s) => s.trim());
   const origin = req.headers.origin || req.headers.referer;
-  if (!origin || !origin.startsWith(allowed)) {
+  if (!origin || !allowed.some((a) => origin.startsWith(a))) {
     return next(Object.assign(new Error('Cross-origin request blocked'), { status: 403 }));
   }
   next();

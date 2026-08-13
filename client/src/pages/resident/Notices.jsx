@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../../api.js';
-import { Layout, Empty, useToast, residentNavLinks } from '../../components/ui.jsx';
+import { Layout, Empty, useToast, residentNavLinks, Icons } from '../../components/ui.jsx';
 
 export default function ResidentNotices() {
   const [notices, setNotices] = useState(null);
@@ -13,13 +13,14 @@ export default function ResidentNotices() {
   if (!notices) return <Layout title="Loading…" navOverride={residentNavLinks()} />;
 
   return (
-    <Layout title="Notices" sub="Announcements from your building admin" navOverride={residentNavLinks()}>
+    <Layout title="Notices" sub="Announcements from your building admin" navOverride={residentNavLinks()} headerIcon={Icons.bell}>
       {notices.length === 0 && <Empty title="No notices yet" hint="Your building admin hasn't posted anything." />}
       <div className="list">
         {notices.map((n) => (
           <div key={n.id} className="glass" style={{ padding: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span className={'icon-badge sm ' + (n.pinned ? 'b-warn' : 'b-adv')}>{Icons.bell}</span>
                 <strong style={{ fontSize: 16 }}>{n.title}</strong>
                 {n.pinned && <span className="chip advance">Pinned</span>}
               </span>

@@ -40,7 +40,9 @@ export default function Funds() {
 
   return (
     <Layout title="Emergency funds" sub="Reserved money for urgent building needs" backTo={`/b/${buildingId}`}
-      actions={<button className="btn primary" onClick={() => setCreateForm({ name: '', reason: '', target_amount: '', notes: '' })}>+ Create fund</button>}>
+      actions={<button className="btn primary" onClick={() => setCreateForm({ name: '', reason: '', target_amount: '', notes: '' })}>{Icons.shield} + Create fund</button>}
+      headerIcon={Icons.shield}
+      mobileExtra={<button className="btn primary sm" onClick={() => setCreateForm({ name: '', reason: '', target_amount: '', notes: '' })}>{Icons.shield} + Create fund</button>}>
 
       {funds && funds.length === 0 && (
         <Empty title="No emergency funds" hint="Create a fund for lift breakdowns, electrical failures or urgent repairs." />
@@ -52,7 +54,7 @@ export default function Funds() {
           return (
             <div key={f.id} className="glass card-hover" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
-                {f.target_amount > 0 && <RadialGauge percent={pct} size={64} stroke={7} color="var(--ok)" />}
+                {f.target_amount > 0 ? <RadialGauge percent={pct} size={64} stroke={7} color="var(--ok)" /> : <div className="icon-badge b-warn">{Icons.shield}</div>}
                 <div>
                   <h3 style={{ margin: 0, fontSize: 16 }}>{f.name}</h3>
                   <div className="mut">{f.reason || 'Emergency reserve'}</div>

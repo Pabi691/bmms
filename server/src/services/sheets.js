@@ -39,7 +39,7 @@ async function getAccessToken() {
 const statusLabel = { paid: 'Paid', partial: 'Partially Paid', due: 'Due' };
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
-function monthlyKeys(buildingId) {
+async function monthlyKeys(buildingId) {
   return db.prepare(
     `SELECT DISTINCT year, month FROM payments WHERE building_id=? AND deleted=0 ORDER BY year, month`
   ).all(buildingId);
@@ -49,7 +49,7 @@ const DASHBOARD_TAB = 'Flat Dashboard';
 const EXPENSES_TAB = 'Expenses';
 const FUNDS_TAB = 'Emergency Funds';
 
-function buildSummaryRows(buildingId, s) {
+async function buildSummaryRows(buildingId, s) {
   const rows = [];
   const push = (...r) => rows.push(r.map((c) => (c === undefined || c === null ? '' : c)));
 
@@ -72,7 +72,7 @@ function buildSummaryRows(buildingId, s) {
   push('Total income', s.totals.totalIncome); push('Total expenses', s.totals.totalExpenses);
   push();
   push('MAINTENANCE PAYMENTS');
-  const pays = db.prepare(
+  const pays = await db.prepare(
     `SELECT p.*, f.number FROM payments p JOIN flats f ON f.id=p.flat_id
      WHERE p.building_id=? AND p.deleted=0 ORDER BY p.year, p.month, p.paid_on`).all(buildingId);
   const byMonth = new Map();
@@ -96,7 +96,7 @@ function buildSummaryRows(buildingId, s) {
   return rows;
 }
 
-function buildExpenseRows(buildingId) {
+async function buildExpenseRows(buildingId) {
   const rows = [];
   const push = (...r) => rows.push(r.map((c) => (c === undefined || c === null ? '' : c)));
 
@@ -104,12 +104,12 @@ function buildExpenseRows(buildingId) {
   push('Last synced', new Date().toLocaleString('en-IN'));
   push();
   push('Date', 'Category', 'Name', 'Amount', 'Method', 'Paid to', 'Description');
-  const exps = db.prepare('SELECT * FROM expenses WHERE building_id=? AND deleted=0 ORDER BY date').all(buildingId);
+  const exps = await db.prepare('SELECT * FROM expenses WHERE building_id=? AND deleted=0 ORDER BY date').all(buildingId);
   for (const e of exps) push(e.date, e.category, e.custom_name, toRupees(e.amount), e.method, e.paid_to, e.description);
   return rows;
 }
 
-function buildFundRows(buildingId) {
+async function buildFundRows(buildingId) {
   const rows = [];
   const push = (...r) => rows.push(r.map((c) => (c === undefined || c === null ? '' : c)));
 
@@ -117,16 +117,16 @@ function buildFundRows(buildingId) {
   push('Last synced', new Date().toLocaleString('en-IN'));
   push();
   push('Fund', 'Reason', 'Target', 'Collected', 'Spent', 'Balance');
-  const funds = db.prepare('SELECT * FROM emergency_funds WHERE building_id=? AND archived=0').all(buildingId);
+  const funds = await db.prepare('SELECT * FROM emergency_funds WHERE building_id=? AND archived=0').all(buildingId);
   for (const f of funds) {
-    const inS = db.prepare("SELECT COALESCE(SUM(amount),0) s FROM fund_tx WHERE fund_id=? AND type='contribution' AND deleted=0").get(f.id).s;
-    const outS = db.prepare("SELECT COALESCE(SUM(amount),0) s FROM fund_tx WHERE fund_id=? AND type='expense' AND deleted=0").get(f.id).s;
+    const inS = (await db.prepare("SELECT COALESCE(SUM(amount),0) s FROM fund_tx WHERE fund_id=? AND type='contribution' AND deleted=0").get(f.id)).s;
+    const outS = (await db.prepare("SELECT COALESCE(SUM(amount),0) s FROM fund_tx WHERE fund_id=? AND type='expense' AND deleted=0").get(f.id)).s;
     push(f.name, f.reason, toRupees(f.target_amount), toRupees(inS), toRupees(outS), toRupees(inS - outS));
   }
   return rows;
 }
 
-function buildDashboardRows(buildingId, keys) {
+async function buildDashboardRows(buildingId, keys) {
   const rows = [];
   const push = (...r) => rows.push(r.map((c) => (c === undefined || c === null ? '' : c)));
 
@@ -134,7 +134,7 @@ function buildDashboardRows(buildingId, keys) {
   push('Last synced', new Date().toLocaleString('en-IN'));
   push();
   for (const { year, month } of keys) {
-    const ms = buildingSummary(buildingId, month, year);
+    const ms = await buildingSummary(buildingId, month, year);
     push(`${MONTH_NAMES[month - 1]} ${year}`);
     push('Flat', 'Owner/Resident', 'Monthly', 'Paid', 'Due', 'Advance', 'Status');
     let totalMonthly = 0, totalPaid = 0, totalDue = 0;
@@ -153,10 +153,10 @@ function flatTabName(number) {
   return `Flat ${number}`;
 }
 
-function buildFlatLedgerTabs(buildingId) {
-  const flats = db.prepare('SELECT * FROM flats WHERE building_id=? AND archived=0 ORDER BY number').all(buildingId);
-  return flats.map((f) => {
-    const led = flatLedger(f.id);
+async function buildFlatLedgerTabs(buildingId) {
+  const flats = await db.prepare('SELECT * FROM flats WHERE building_id=? AND archived=0 ORDER BY number').all(buildingId);
+  return Promise.all(flats.map(async (f) => {
+    const led = await flatLedger(f.id);
     const rows = [];
     const push = (...r) => rows.push(r.map((c) => (c === undefined || c === null ? '' : c)));
     push(`FLAT ${f.number} — LEDGER`);
@@ -164,11 +164,11 @@ function buildFlatLedgerTabs(buildingId) {
     push();
     push('Date', 'Type', 'Description', 'Month', 'Paid', 'Status');
     for (const r of led.ledger) {
-      const st = monthState(f.id, r.month, r.year);
+      const st = await monthState(f.id, r.month, r.year);
       push(r.date, r.type, r.description, `${MONTH_NAMES[r.month - 1]} ${r.year}`, r.credit, statusLabel[st.status] || st.status);
     }
     return { name: flatTabName(f.number), rows };
-  });
+  }));
 }
 
 async function getSheetList(base, headers) {
@@ -216,23 +216,103 @@ async function writeTab(base, headers, tab, rows) {
   if (!res.ok) throw new Error(`Write failed (${tab}): ${(await res.json()).error?.message}`);
 }
 
+async function writeRange(base, headers, tab, range, values) {
+  const res = await fetch(
+    `${base}/values/${encodeURIComponent(tab + '!' + range)}?valueInputOption=USER_ENTERED`,
+    { method: 'PUT', headers, body: JSON.stringify({ values }) }
+  );
+  if (!res.ok) throw new Error(`Write chart data failed (${tab}): ${(await res.json()).error?.message}`);
+}
+
+async function getSheetsWithCharts(base, headers) {
+  const res = await fetch(`${base}?fields=sheets(properties,charts)`, { headers });
+  if (!res.ok) throw new Error(`Read spreadsheet failed: ${(await res.json()).error?.message}`);
+  const data = await res.json();
+  return data.sheets || [];
+}
+
+const COLLECTION_CHART_TITLE = 'Collection Status (This Month)';
+const BALANCE_CHART_TITLE = 'Balance Composition';
+
+function pieChartRequest(sheetId, title, dataStartRow, dataEndRow, anchorCol, anchorRow) {
+  // chart source data lives in columns N/O (index 13/14) — off to the side,
+  // out of the way of the readable summary in A/B and of the charts
+  // themselves (anchored starting at column D, the blank space next to it).
+  return {
+    addChart: {
+      chart: {
+        spec: {
+          title,
+          pieChart: {
+            legendPosition: 'RIGHT_LEGEND',
+            domain: { sourceRange: { sources: [{ sheetId, startRowIndex: dataStartRow, endRowIndex: dataEndRow, startColumnIndex: 13, endColumnIndex: 14 }] } },
+            series: { sourceRange: { sources: [{ sheetId, startRowIndex: dataStartRow, endRowIndex: dataEndRow, startColumnIndex: 14, endColumnIndex: 15 }] } },
+          },
+        },
+        position: {
+          overlayPosition: {
+            anchorCell: { sheetId, rowIndex: anchorRow, columnIndex: anchorCol },
+            widthPixels: 440, heightPixels: 300,
+          },
+        },
+      },
+    },
+  };
+}
+
+// Fills the blank space beside the Financial Summary with two pie charts
+// (this month's Collected vs Pending, and the available balance's Cash vs
+// Bank split) and auto-fits columns A/B — re-run on every sync, deleting
+// any chart(s) a previous sync added first so re-syncing never piles up
+// duplicates.
+async function syncSummaryCharts(base, headers, tabName, s) {
+  const sheets = await getSheetsWithCharts(base, headers);
+  const sheet = sheets.find((sh) => sh.properties.title === tabName);
+  if (!sheet) return;
+  const sheetId = sheet.properties.sheetId;
+
+  await writeRange(base, headers, tabName, 'N1:O2', [
+    ['Collected (this month)', s.totals.collectedMonth],
+    ['Pending (this month)', s.totals.pendingMonth],
+  ]);
+  await writeRange(base, headers, tabName, 'N4:O5', [
+    ['Cash balance', s.totals.cash],
+    ['Bank balance', s.totals.bank],
+  ]);
+
+  const staleTitles = [COLLECTION_CHART_TITLE, BALANCE_CHART_TITLE];
+  const deleteRequests = (sheet.charts || [])
+    .filter((c) => staleTitles.includes(c.spec?.title))
+    .map((c) => ({ deleteEmbeddedObject: { objectId: c.chartId } }));
+
+  const requests = [
+    ...deleteRequests,
+    pieChartRequest(sheetId, COLLECTION_CHART_TITLE, 0, 2, 3, 1),
+    pieChartRequest(sheetId, BALANCE_CHART_TITLE, 3, 5, 3, 18),
+    { autoResizeDimensions: { dimensions: { sheetId, dimension: 'COLUMNS', startIndex: 0, endIndex: 2 } } },
+  ];
+
+  const res = await fetch(`${base}:batchUpdate`, { method: 'POST', headers, body: JSON.stringify({ requests }) });
+  if (!res.ok) throw new Error(`Chart sync failed: ${(await res.json()).error?.message}`);
+}
+
 export async function syncBuilding(buildingId) {
-  const conn = db.prepare('SELECT * FROM sheet_connections WHERE building_id=?').get(buildingId);
+  const conn = await db.prepare('SELECT * FROM sheet_connections WHERE building_id=?').get(buildingId);
   if (!conn) throw Object.assign(new Error('No Google Sheet connected for this building'), { status: 400 });
   try {
     const now = new Date();
-    const s = buildingSummary(buildingId, now.getMonth() + 1, now.getFullYear());
+    const s = await buildingSummary(buildingId, now.getMonth() + 1, now.getFullYear());
     const token = await getAccessToken();
     const base = `https://sheets.googleapis.com/v4/spreadsheets/${conn.sheet_id}`;
     const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 
-    const keys = monthlyKeys(buildingId);
+    const keys = await monthlyKeys(buildingId);
     const tabs = [
-      { name: conn.sheet_tab, rows: buildSummaryRows(buildingId, s) },
-      { name: DASHBOARD_TAB, rows: buildDashboardRows(buildingId, keys) },
-      { name: EXPENSES_TAB, rows: buildExpenseRows(buildingId) },
-      { name: FUNDS_TAB, rows: buildFundRows(buildingId) },
-      ...buildFlatLedgerTabs(buildingId),
+      { name: conn.sheet_tab, rows: await buildSummaryRows(buildingId, s) },
+      { name: DASHBOARD_TAB, rows: await buildDashboardRows(buildingId, keys) },
+      { name: EXPENSES_TAB, rows: await buildExpenseRows(buildingId) },
+      { name: FUNDS_TAB, rows: await buildFundRows(buildingId) },
+      ...await buildFlatLedgerTabs(buildingId),
     ];
 
     const wantedNames = tabs.map((t) => t.name);
@@ -243,15 +323,16 @@ export async function syncBuilding(buildingId) {
       await writeTab(base, headers, t.name, t.rows);
       totalRows += t.rows.length;
     }
+    await syncSummaryCharts(base, headers, conn.sheet_tab, s);
 
     const ts = new Date().toISOString();
-    db.prepare("UPDATE sheet_connections SET status='connected', last_sync=? WHERE building_id=?").run(ts, buildingId);
-    db.prepare("INSERT INTO sync_logs (building_id, status, message) VALUES (?, 'success', ?)")
+    await db.prepare("UPDATE sheet_connections SET status='connected', last_sync=? WHERE building_id=?").run(ts, buildingId);
+    await db.prepare("INSERT INTO sync_logs (building_id, status, message) VALUES (?, 'success', ?)")
       .run(buildingId, `Synced ${totalRows} rows across ${tabs.length} tabs`);
     return { ok: true, rows: totalRows, tabs: tabs.map((t) => t.name), last_sync: ts };
   } catch (e) {
-    db.prepare("UPDATE sheet_connections SET status='error' WHERE building_id=?").run(buildingId);
-    db.prepare("INSERT INTO sync_logs (building_id, status, message) VALUES (?, 'error', ?)")
+    await db.prepare("UPDATE sheet_connections SET status='error' WHERE building_id=?").run(buildingId);
+    await db.prepare("INSERT INTO sync_logs (building_id, status, message) VALUES (?, 'error', ?)")
       .run(buildingId, e.message);
     throw Object.assign(e, { status: e.status || 502 });
   }
@@ -260,7 +341,7 @@ export async function syncBuilding(buildingId) {
 // Fire-and-forget auto sync after data changes (never blocks the API response).
 export function autoSync(buildingId) {
   if (process.env.SHEETS_AUTOSYNC !== 'true') return;
-  const conn = db.prepare('SELECT id FROM sheet_connections WHERE building_id=?').get(buildingId);
-  if (!conn) return;
-  syncBuilding(buildingId).catch(() => {});
+  db.prepare('SELECT id FROM sheet_connections WHERE building_id=?').get(buildingId)
+    .then((conn) => { if (conn) return syncBuilding(buildingId); })
+    .catch(() => {});
 }

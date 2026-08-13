@@ -32,8 +32,8 @@ export default function ChangePassword() {
   };
 
   return (
-    <div style={{ minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-      <div className="glass" style={{ width: 'min(380px, 100%)', padding: 28 }}>
+    <div className="login-shell">
+      <div className="glass login-card">
         <h1 style={{ marginTop: 0, fontSize: 20 }}>Set a new password</h1>
         <div className="mut" style={{ marginBottom: 20 }}>
           {user?.mustChangePassword

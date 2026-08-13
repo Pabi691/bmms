@@ -40,7 +40,9 @@ export default function Expenses() {
 
   return (
     <Layout title="Expenses" sub={`${list.length} records · total ${inr(total)}`} backTo={`/b/${buildingId}`}
-      actions={<button className="btn primary" onClick={() => setForm({ ...blank })}>+ Expense</button>}>
+      actions={<button className="btn primary" onClick={() => setForm({ ...blank })}>{Icons.expense} + Expense</button>}
+      headerIcon={Icons.expense}
+      mobileExtra={<button className="btn primary sm" onClick={() => setForm({ ...blank })}>{Icons.expense} + Expense</button>}>
 
       <div className="searchbar">
         <input placeholder="Search expenses…" value={q} onChange={(e) => setQ(e.target.value)} />
@@ -59,13 +61,23 @@ export default function Expenses() {
             {list.map((x) => (
               <tr key={x.id}>
                 <td>{x.date}</td>
-                <td><strong>{x.custom_name || x.category}</strong><div className="mut">{x.description}</div></td>
+                <td>
+                  <strong>{x.custom_name || x.category}</strong>
+                  {!!x.is_adjustment && <span className="chip partial" style={{ marginLeft: 6 }}>Auto (adjustment)</span>}
+                  <div className="mut">{x.description}</div>
+                </td>
                 <td>{x.paid_to || '—'}</td>
                 <td className="t-right num" style={{ color: 'var(--bad)' }}>−{inr(x.amount)}</td>
                 <td className="mut">{x.method}</td>
                 <td className="t-right" style={{ whiteSpace: 'nowrap' }}>
-                  <button className="btn sm icon-only" onClick={() => setForm({ ...x })} data-label="Edit" aria-label="Edit">{Icons.edit}</button>{' '}
-                  <button className="btn sm icon-only danger" onClick={() => remove(x)} data-label="Delete" aria-label="Delete">{Icons.trash}</button>
+                  {x.is_adjustment ? (
+                    <span className="mut" style={{ fontSize: 12 }} data-label="Edit the source payment instead">—</span>
+                  ) : (
+                    <>
+                      <button className="btn sm icon-only" onClick={() => setForm({ ...x })} data-label="Edit" aria-label="Edit">{Icons.edit}</button>{' '}
+                      <button className="btn sm icon-only danger" onClick={() => remove(x)} data-label="Delete" aria-label="Delete">{Icons.trash}</button>
+                    </>
+                  )}
                 </td>
               </tr>
             ))}
@@ -77,14 +89,22 @@ export default function Expenses() {
         {list.map((x) => (
           <div key={x.id} className="glass rowcard">
             <div className="rc-top">
-              <span className="rc-title">{x.custom_name || x.category}</span>
+              <span className="rc-title-block">
+                <span className="icon-badge sm b-warn">{Icons.expense}</span>
+                <span className="rc-title">{x.custom_name || x.category}</span>
+              </span>
               <strong className="num" style={{ color: 'var(--bad)' }}>−{inr(x.amount)}</strong>
             </div>
-            <div className="rc-meta"><span>{x.date}</span><span>{x.method}</span>{x.paid_to && <span>to {x.paid_to}</span>}</div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn sm icon-only" onClick={() => setForm({ ...x })} data-label="Edit" aria-label="Edit">{Icons.edit}</button>
-              <button className="btn sm icon-only danger" onClick={() => remove(x)} data-label="Delete" aria-label="Delete">{Icons.trash}</button>
+            <div className="rc-meta">
+              <span>{x.date}</span><span>{x.method}</span>{x.paid_to && <span>to {x.paid_to}</span>}
+              {!!x.is_adjustment && <span className="chip partial">Auto (adjustment)</span>}
             </div>
+            {!x.is_adjustment && (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn sm icon-only" onClick={() => setForm({ ...x })} data-label="Edit" aria-label="Edit">{Icons.edit}</button>
+                <button className="btn sm icon-only danger" onClick={() => remove(x)} data-label="Delete" aria-label="Delete">{Icons.trash}</button>
+              </div>
+            )}
           </div>
         ))}
       </div>

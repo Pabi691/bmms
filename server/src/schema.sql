@@ -218,6 +218,66 @@ CREATE TABLE IF NOT EXISTS payment_submissions (
 CREATE INDEX IF NOT EXISTS idx_paysub_building ON payment_submissions(building_id, status);
 CREATE INDEX IF NOT EXISTS idx_paysub_flat     ON payment_submissions(flat_id);
 
+-- Recurring per-flat charges beyond Maintenance (which stays in
+-- flats.monthly_amount). Custom charges are one-off, entered at payment
+-- time, so they never get a row here.
+CREATE TABLE IF NOT EXISTS flat_charges (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  building_id    INTEGER NOT NULL REFERENCES buildings(id) ON DELETE CASCADE,
+  flat_id        INTEGER NOT NULL REFERENCES flats(id) ON DELETE CASCADE,
+  category       TEXT NOT NULL CHECK (category IN ('electricity','internet','water')),
+  monthly_amount INTEGER NOT NULL CHECK (monthly_amount >= 0),
+  active         INTEGER NOT NULL DEFAULT 1,
+  created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (flat_id, category)
+);
+CREATE INDEX IF NOT EXISTS idx_flatcharges_flat     ON flat_charges(flat_id);
+CREATE INDEX IF NOT EXISTS idx_flatcharges_building  ON flat_charges(building_id);
+
+-- Per-line breakdown of a resident's multi-category payment submission.
+-- Submissions made before this feature existed have zero rows here — the
+-- approval route treats "no items" as the legacy single-category path.
+CREATE TABLE IF NOT EXISTS payment_submission_items (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  submission_id  INTEGER NOT NULL REFERENCES payment_submissions(id) ON DELETE CASCADE,
+  category       TEXT NOT NULL CHECK (category IN ('maintenance','electricity','internet','water','custom')),
+  amount         INTEGER NOT NULL CHECK (amount > 0),
+  is_adjustment  INTEGER NOT NULL DEFAULT 0,
+  custom_title   TEXT,
+  notes          TEXT,
+  created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_paysubitems_submission ON payment_submission_items(submission_id);
+
+-- One row per approved direct-vendor-payment credit. Created ONLY at the
+-- moment of approval — a resident-submitted claim's pending/rejected state
+-- lives on payment_submissions.adjustment_* + .status; this table only ever
+-- holds decided, active credit. deleted=1 means "revoked" (mirrors
+-- payments/expenses/advance_tx's own soft-delete convention).
+CREATE TABLE IF NOT EXISTS resident_credits (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  building_id   INTEGER NOT NULL REFERENCES buildings(id) ON DELETE CASCADE,
+  flat_id       INTEGER NOT NULL REFERENCES flats(id) ON DELETE CASCADE,
+  submission_id INTEGER REFERENCES payment_submissions(id) ON DELETE SET NULL,
+  category      TEXT NOT NULL CHECK (category IN
+                  ('electricity','internet','water','sweeper','security','cleaning','generator','custom')),
+  custom_title  TEXT,
+  amount        INTEGER NOT NULL CHECK (amount > 0),
+  month         INTEGER NOT NULL CHECK (month BETWEEN 1 AND 12),
+  year          INTEGER NOT NULL CHECK (year BETWEEN 2000 AND 2100),
+  paid_on       TEXT NOT NULL,
+  receipt_path  TEXT,
+  expense_id    INTEGER REFERENCES expenses(id) ON DELETE SET NULL,
+  notes         TEXT,
+  created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  deleted       INTEGER NOT NULL DEFAULT 0,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_residentcredits_flat       ON resident_credits(flat_id, deleted);
+CREATE INDEX IF NOT EXISTS idx_residentcredits_building   ON resident_credits(building_id, deleted);
+CREATE INDEX IF NOT EXISTS idx_residentcredits_submission ON resident_credits(submission_id);
+
 CREATE TABLE IF NOT EXISTS notices (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   building_id  INTEGER NOT NULL REFERENCES buildings(id) ON DELETE CASCADE,

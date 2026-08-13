@@ -26,21 +26,21 @@ export function clearAuthCookie(res) {
 // Verifies the session cookie, confirms the session hasn't been revoked/
 // expired/idle-timed-out, loads the user, and blocks login for suspended
 // buildings/accounts. Attaches req.user and req.sessionId.
-export function requireAuth(req, res, next) {
+export async function requireAuth(req, res, next) {
   try {
     const token = req.signedCookies?.[COOKIE_NAME];
     if (!token) throw err('Not signed in', 401);
     const payload = verifyAccessToken(token);
     if (!payload) throw err('Session invalid or expired', 401);
-    const session = touchAndValidateSession(payload.sid);
+    const session = await touchAndValidateSession(payload.sid);
     if (!session) throw err('Session expired — please sign in again', 401);
 
-    const user = db.prepare('SELECT * FROM users WHERE id=?').get(payload.sub);
+    const user = await db.prepare('SELECT * FROM users WHERE id=?').get(payload.sub);
     if (!user) throw err('Account no longer exists', 401);
     if (user.status === 'suspended') throw err('Account suspended', 403);
 
     if (user.building_id) {
-      const building = db.prepare('SELECT status FROM buildings WHERE id=?').get(user.building_id);
+      const building = await db.prepare('SELECT status FROM buildings WHERE id=?').get(user.building_id);
       if (building?.status === 'suspended') {
         throw err('This building has been suspended — contact your Master Admin', 403);
       }
@@ -76,8 +76,8 @@ export function assertBuildingAccess(req, buildingId) {
 // Looks a row up via getterFn(...args), 404s if missing, and enforces
 // building-scoping on it in one call — the retrofit workhorse for routes
 // that take a bare resource id with no buildingId in the URL.
-export function loadScoped(req, getterFn, ...args) {
-  const row = getterFn(...args);
+export async function loadScoped(req, getterFn, ...args) {
+  const row = await getterFn(...args);
   if (!row) throw err('Not found', 404);
   assertBuildingAccess(req, row.building_id);
   return row;

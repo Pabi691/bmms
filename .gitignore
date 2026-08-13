@@ -2,6 +2,8 @@ node_modules/
 server/data/
 server/uploads/
 server/.env
+.env
 client/dist/
 *.log
 .DS_Store
+.vercel

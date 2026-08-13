@@ -2,16 +2,35 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, inr } from '../api.js';
 import { Layout, Modal, Empty, useToast, Icons, StatusChip } from '../components/ui.jsx';
+import { useAuth } from '../auth.jsx';
 
 const blank = { name: '', address: '', description: '', floors: '', total_flats: '', manager_name: '', contact: '', notes: '' };
+
+// purely visual — gives each building card a recognizable identity at a
+// glance (like an avatar color), cycled by list position, not real data
+const ACCENTS = [
+  { fg: '#3aa0ff', bg: 'rgba(58,160,255,.16)' },
+  { fg: '#2dd4a7', bg: 'rgba(45,212,167,.16)' },
+  { fg: '#f5b84d', bg: 'rgba(245,184,77,.16)' },
+  { fg: '#b48bff', bg: 'rgba(180,139,255,.16)' },
+];
+
+const STATUS_FILTERS = [
+  { key: 'all', label: 'All buildings' },
+  { key: 'active', label: 'Active only' },
+  { key: 'suspended', label: 'Suspended only' },
+];
 
 export default function Buildings() {
   const [list, setList] = useState(null);
   const [q, setQ] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [filterOpen, setFilterOpen] = useState(false);
   const [form, setForm] = useState(null); // null closed | object = create/edit
   const [adminModal, setAdminModal] = useState(null); // building being managed
   const nav = useNavigate();
   const toast = useToast();
+  const { logout } = useAuth();
 
   const load = () => api.get('/admin/buildings').then(setList).catch((e) => toast(e.message));
   useEffect(() => { load(); }, []);
@@ -51,54 +70,84 @@ export default function Buildings() {
     load();
   };
 
-  const filtered = (list || []).filter((b) => b.name.toLowerCase().includes(q.toLowerCase()));
+  const filtered = (list || []).filter((b) =>
+    b.name.toLowerCase().includes(q.toLowerCase()) &&
+    (statusFilter === 'all' || (b.status || 'active') === statusFilter)
+  );
 
   return (
     <Layout
       title="My buildings"
       sub="Every building keeps its own flats, payments and balances"
       actions={<button className="btn primary" onClick={() => setForm({ ...blank })}>+ New building</button>}
+      headerIcon={Icons.building}
+      mobileExtra={<button className="btn primary sm" onClick={() => setForm({ ...blank })}>+ New building</button>}
+      more={[{ label: 'Sign out', onClick: logout }]}
     >
-      <div className="searchbar">
-        <input placeholder="Search buildings…" value={q} onChange={(e) => setQ(e.target.value)} />
+      <div className="buildings-search-row">
+        <div className="searchbar">
+          <input placeholder="Search buildings…" value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+        <div className="filter-wrap" tabIndex={-1} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setFilterOpen(false); }}>
+          <button className="btn icon-only" onClick={() => setFilterOpen((o) => !o)} data-label="Filter" aria-label="Filter" aria-expanded={filterOpen}>{Icons.filter}</button>
+          {filterOpen && (
+            <div className="filter-menu">
+              {STATUS_FILTERS.map((f) => (
+                <button key={f.key} className={statusFilter === f.key ? 'active' : ''} onClick={() => { setStatusFilter(f.key); setFilterOpen(false); }}>
+                  {f.label}{statusFilter === f.key && Icons.check}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
-      {list && filtered.length === 0 && (
+      {list && filtered.length === 0 && (list.length === 0 ? (
         <Empty title="No buildings yet" hint="Create your first building to start tracking maintenance." />
-      )}
+      ) : (
+        <Empty title="No buildings match" hint="Try a different search or switch the filter back to All buildings." />
+      ))}
 
       <div className="grid cards">
-        {filtered.map((b) => (
-          <div key={b.id} className="glass card-hover" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: 17 }}>{b.name}</h3>
-                <div className="mut">{b.address || `Building #${b.id}`}</div>
+        {filtered.map((b, i) => {
+          const accent = ACCENTS[i % ACCENTS.length];
+          return (
+            <div key={b.id} className="glass card-hover building-card">
+              <div className="bc-head">
+                <div className="bc-avatar" style={{ background: accent.bg, color: accent.fg }}>{Icons.building}</div>
+                <div className="bc-name-block">
+                  <h3>{b.name}</h3>
+                  <div className="mut">{b.address || `Building #${b.id}`}</div>
+                </div>
+                <div className="bc-badges">
+                  <span className="bc-flats-pill" style={{ background: accent.bg, color: accent.fg }}>{b.stats.flats} flat{b.stats.flats === 1 ? '' : 's'}</span>
+                  {b.status === 'suspended' && <span className="chip due">Suspended</span>}
+                </div>
               </div>
-              <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-                <span className="mut num">{b.stats.flats} flats</span>
-                {b.status === 'suspended' && <span className="chip due">Suspended</span>}
-              </span>
+              <div className="bc-stats">
+                <div><div className="lbl">Available balance</div><div className="val">{inr(b.stats.availableBalance)}</div></div>
+                <div><div className="lbl">This month collected</div><div className="val" style={{ color: 'var(--ok)' }}>{inr(b.stats.collectedMonth)}</div></div>
+                <div><div className="lbl">Pending</div><div className="val" style={{ color: b.stats.pendingMonth > 0 ? 'var(--bad)' : 'var(--ok)' }}>{inr(b.stats.pendingMonth)}</div></div>
+                <div><div className="lbl">Emergency fund</div><div className="val" style={{ color: 'var(--adv)' }}>{inr(b.stats.emergencyFund)}</div></div>
+              </div>
+              <div className="bc-admin">
+                Admin login: {b.admin ? <strong>{b.admin.username}</strong> : <em>not created yet</em>}
+              </div>
+              <div className="bc-actions">
+                <div className="bc-actions-primary">
+                  <button className="btn primary sm" onClick={() => nav(`/b/${b.id}`)}>Open dashboard</button>
+                  <button className="btn sm" onClick={() => setAdminModal(b)}>Admin login</button>
+                </div>
+                <div className="bc-actions-icons">
+                  <button className="btn sm icon-only" onClick={() => setForm({ ...blank, ...b })} data-label="Edit" aria-label="Edit">{Icons.edit}</button>
+                  <button className="btn sm icon-only" onClick={() => toggleStatus(b)} data-label={b.status === 'suspended' ? 'Reactivate' : 'Suspend'} aria-label="Suspend/Activate">{Icons.shield}</button>
+                  <button className="btn sm icon-only danger" onClick={() => archive(b)} data-label="Archive" aria-label="Archive">{Icons.archive}</button>
+                  <button className="btn sm icon-only danger" onClick={() => remove(b)} data-label="Delete" aria-label="Delete">{Icons.trash}</button>
+                </div>
+              </div>
             </div>
-            <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-              <div><div className="mut">Available balance</div><div className="num" style={{ fontWeight: 700 }}>{inr(b.stats.availableBalance)}</div></div>
-              <div><div className="mut">This month collected</div><div className="num" style={{ fontWeight: 700, color: 'var(--ok)' }}>{inr(b.stats.collectedMonth)}</div></div>
-              <div><div className="mut">Pending</div><div className="num" style={{ fontWeight: 700, color: b.stats.pendingMonth > 0 ? 'var(--bad)' : 'inherit' }}>{inr(b.stats.pendingMonth)}</div></div>
-              <div><div className="mut">Emergency fund</div><div className="num" style={{ fontWeight: 700, color: 'var(--adv)' }}>{inr(b.stats.emergencyFund)}</div></div>
-            </div>
-            <div className="mut">
-              Admin login: {b.admin ? <strong style={{ color: 'var(--text)' }}>{b.admin.username}</strong> : <em>not created yet</em>}
-            </div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
-              <button className="btn primary sm" style={{ flex: 1 }} onClick={() => nav(`/b/${b.id}`)}>Open dashboard</button>
-              <button className="btn sm" onClick={() => setAdminModal(b)}>Admin login</button>
-              <button className="btn sm icon-only" onClick={() => setForm({ ...blank, ...b })} data-label="Edit" aria-label="Edit">{Icons.edit}</button>
-              <button className="btn sm icon-only" onClick={() => toggleStatus(b)} data-label={b.status === 'suspended' ? 'Reactivate' : 'Suspend'} aria-label="Suspend/Activate">{Icons.shield}</button>
-              <button className="btn sm icon-only danger" onClick={() => archive(b)} data-label="Archive" aria-label="Archive">{Icons.archive}</button>
-              <button className="btn sm icon-only danger" onClick={() => remove(b)} data-label="Delete" aria-label="Delete">{Icons.trash}</button>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <Modal open={!!form} onClose={() => setForm(null)} title={form?.id ? 'Edit building' : 'Create building'}>

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../api.js';
-import { Layout, useToast, residentNavLinks } from '../../components/ui.jsx';
+import { Layout, useToast, residentNavLinks, Icons } from '../../components/ui.jsx';
 
 export default function Profile() {
   const [profile, setProfile] = useState(null);
@@ -22,8 +22,12 @@ export default function Profile() {
   if (!profile) return <Layout title="Loading…" navOverride={residentNavLinks()} />;
 
   return (
-    <Layout title="Profile" sub="Your account details" navOverride={residentNavLinks()}>
+    <Layout title="Profile" sub="Your account details" navOverride={residentNavLinks()} headerIcon={Icons.user}>
       <div className="glass" style={{ maxWidth: 460 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+          <span className="icon-badge b-credit">{Icons.user}</span>
+          <strong style={{ fontSize: 15 }}>Account details</strong>
+        </div>
         <form onSubmit={save}>
           <div className="field"><label>Username</label>
             <input value={profile.username} disabled /></div>

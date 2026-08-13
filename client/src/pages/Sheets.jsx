@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../api.js';
-import { Layout, useToast } from '../components/ui.jsx';
+import { Layout, useToast, Icons } from '../components/ui.jsx';
 
 export default function Sheets() {
   const { buildingId } = useParams();
@@ -32,10 +32,10 @@ export default function Sheets() {
   const c = data?.connection;
 
   return (
-    <Layout title="Google Sheet" sub="This building's synchronized external record" backTo={`/b/${buildingId}`}>
+    <Layout title="Google Sheet" sub="This building's synchronized external record" backTo={`/b/${buildingId}`} headerIcon={Icons.sheet}>
       <div className="grid two">
         <div className="glass">
-          <h3 style={{ marginTop: 0, fontSize: 15 }}>Connection</h3>
+          <h3 style={{ marginTop: 0, fontSize: 15, display: 'flex', alignItems: 'center', gap: 10 }}><span className="icon-badge sm b-ok">{Icons.sheet}</span> Connection</h3>
           {c && (
             <div style={{ marginBottom: 14 }}>
               <span className={'chip ' + (c.status === 'connected' ? 'paid' : 'due')}>

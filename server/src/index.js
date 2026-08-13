@@ -19,10 +19,15 @@ import { ensureMasterAdmin } from './seedMasterAdmin.js';
 process.on('unhandledRejection', (e) => console.error('[unhandledRejection]', e));
 
 const app = express();
-const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
+// Comma-separated list so a phone/LAN address can be allowed alongside
+// localhost during dev, without dropping either.
+const CLIENT_ORIGINS = (process.env.CLIENT_ORIGIN || 'http://localhost:5173').split(',').map((s) => s.trim());
 
 app.use(helmet());
-app.use(cors({ origin: CLIENT_ORIGIN, credentials: true }));
+app.use(cors({
+  origin: (origin, cb) => (!origin || CLIENT_ORIGINS.includes(origin) ? cb(null, true) : cb(new Error('Not allowed by CORS'))),
+  credentials: true,
+}));
 app.use(express.json());
 app.use(cookieParser(process.env.COOKIE_SECRET));
 app.use('/api', verifyOrigin);
@@ -47,8 +52,18 @@ app.use((err, req, res, next) => {
   res.status(status).json({ error: err.message || 'Internal server error' });
 });
 
-const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => {
-  console.log(`BMMS API running on http://localhost:${PORT}`);
+// On Vercel, this module is imported by api/index.js as a serverless
+// handler — the platform invokes the exported `app` per-request, so it
+// must never call listen() itself. Locally (and on any other host), it
+// runs as a normal long-lived Express server.
+if (!process.env.VERCEL) {
+  const PORT = process.env.PORT || 4000;
+  app.listen(PORT, () => {
+    console.log(`BMMS API running on http://localhost:${PORT}`);
+    ensureMasterAdmin().catch((e) => console.error('[auth] ensureMasterAdmin failed:', e));
+  });
+} else {
   ensureMasterAdmin().catch((e) => console.error('[auth] ensureMasterAdmin failed:', e));
-});
+}
+
+export default app;

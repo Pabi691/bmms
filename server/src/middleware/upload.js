@@ -1,15 +1,6 @@
 import multer from 'multer';
-import fs from 'fs';
-import path from 'path';
 import crypto from 'crypto';
-import { fileURLToPath } from 'url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-export const UPLOAD_ROOT = process.env.UPLOAD_DIR || path.join(__dirname, '..', '..', 'uploads');
-const SCREENSHOT_DIR = path.join(UPLOAD_ROOT, 'payment-screenshots');
-const QR_DIR = path.join(UPLOAD_ROOT, 'building-qr');
-fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
-fs.mkdirSync(QR_DIR, { recursive: true });
+import { put } from '@vercel/blob';
 
 const ALLOWED_MIME = {
   'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'application/pdf': '.pdf',
@@ -18,26 +9,21 @@ const IMAGE_ONLY_MIME = {
   'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp',
 };
 
-function makeUploader(dir, allowed) {
-  const storage = multer.diskStorage({
-    destination: (req, file, cb) => cb(null, dir),
-    filename: (req, file, cb) => {
-      // randomized name — never trust/reuse the client-supplied filename (path traversal, collisions)
-      const ext = allowed[file.mimetype] || '';
-      cb(null, crypto.randomBytes(16).toString('hex') + ext);
-    },
-  });
+// In-memory storage: Vercel functions have no persistent disk, so the file
+// lives only as a buffer for the length of the request, then goes straight
+// to Vercel Blob (see putUpload below) instead of a local path.
+function makeUploader(allowed) {
   const fileFilter = (req, file, cb) => {
     if (!allowed[file.mimetype]) {
       return cb(Object.assign(new Error('Unsupported file type'), { status: 400 }));
     }
     cb(null, true);
   };
-  return multer({ storage, fileFilter, limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
+  return multer({ storage: multer.memoryStorage(), fileFilter, limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
 }
 
-export const uploadPaymentScreenshot = makeUploader(SCREENSHOT_DIR, ALLOWED_MIME).single('screenshot');
-export const uploadBuildingQr = makeUploader(QR_DIR, IMAGE_ONLY_MIME).single('qr');
+export const uploadPaymentScreenshot = makeUploader(ALLOWED_MIME).single('screenshot');
+export const uploadBuildingQr = makeUploader(IMAGE_ONLY_MIME).single('qr');
 
 const MAGIC = [
   { mime: 'image/jpeg', bytes: [0xff, 0xd8, 0xff] },
@@ -46,25 +32,48 @@ const MAGIC = [
 ];
 
 // Declared Content-Type can be spoofed by the client — this reads the real
-// file header and confirms it matches, deleting the file and throwing if not.
-export function sniffAndValidate(filePath, declaredMime) {
-  const fd = fs.openSync(filePath, 'r');
-  const buf = Buffer.alloc(16);
-  fs.readSync(fd, buf, 0, 16, 0);
-  fs.closeSync(fd);
-
+// file header from the in-memory buffer and confirms it matches.
+export function sniffAndValidate(buffer, declaredMime) {
   let ok = false;
   if (declaredMime === 'image/webp') {
-    ok = buf.subarray(0, 4).toString('ascii') === 'RIFF' && buf.subarray(8, 12).toString('ascii') === 'WEBP';
+    ok = buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP';
   } else {
     const match = MAGIC.find((m) => m.mime === declaredMime);
-    ok = !!match && match.bytes.every((b, i) => buf[i] === b);
+    ok = !!match && match.bytes.every((b, i) => buffer[i] === b);
   }
   if (!ok) {
-    fs.unlinkSync(filePath);
     throw Object.assign(new Error('File content does not match its declared type'), { status: 400 });
   }
 }
 
-export const SCREENSHOT_DIR_ABS = SCREENSHOT_DIR;
-export const QR_DIR_ABS = QR_DIR;
+// Uploads to Vercel Blob under a randomized name (never the client-supplied
+// filename — path traversal, collisions) and returns the blob's URL. That
+// URL is what gets stored in the DB column that used to hold a local
+// filename (screenshot_path / bank_qr_path). Vercel Blob only supports
+// `access: 'public'` — the URL itself is unguessable, and the two serving
+// routes below never hand it to the client directly; they always check
+// auth first and proxy the bytes through streamBlob.
+export async function putUpload(file, folder) {
+  const ext = ALLOWED_MIME[file.mimetype] || '';
+  const name = `${folder}/${crypto.randomBytes(16).toString('hex')}${ext}`;
+  const blob = await put(name, file.buffer, {
+    access: 'public',
+    contentType: file.mimetype,
+    addRandomSuffix: false,
+  });
+  return blob.url;
+}
+
+// Streams a previously-uploaded blob back through our own server so the
+// caller's auth check (never express.static, never a raw redirect to the
+// blob URL) still gates access.
+export async function streamBlob(url, res) {
+  const r = await fetch(url);
+  if (!r.ok || !r.body) {
+    if (!res.headersSent) res.status(404).json({ error: 'File not found' });
+    return;
+  }
+  res.setHeader('Content-Type', r.headers.get('content-type') || 'application/octet-stream');
+  for await (const chunk of r.body) res.write(chunk);
+  res.end();
+}
