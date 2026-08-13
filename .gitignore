@@ -10,3 +10,6 @@ client/dist/
 *.log
 .DS_Store
 .vercel
+
+# Google Cloud service-account key files — never commit real credentials
+coherent-fold-457104-d4-78d0e696ece8.json
