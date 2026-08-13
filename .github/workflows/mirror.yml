@@ -1,0 +1,58 @@
+name: Mirror from joydip repo (build-gated)
+
+# Polls joydipghosh55-jpg/bmms on a schedule and, only if there are new
+# commits AND they build successfully, merges and pushes them into this
+# repo's main — which is what actually triggers the live Vercel deploy.
+# A push-triggered mirror isn't possible here since we don't have admin
+# access on the source repo to register a webhook/secret there; polling
+# from this side only needs read access we already have.
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git identity
+        run: |
+          git config user.name "mirror-bot"
+          git config user.email "actions@github.com"
+
+      - name: Fetch source repo
+        run: git fetch "https://x-access-token:${{ secrets.JOYDIP_REPO_TOKEN }}@github.com/joydipghosh55-jpg/bmms.git" main:joydip-main
+
+      - name: Check for new commits
+        id: check
+        run: |
+          if git merge-base --is-ancestor joydip-main main; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Merge source changes
+        if: steps.check.outputs.changed == 'true'
+        run: git merge --no-edit joydip-main
+
+      - name: Install dependencies
+        if: steps.check.outputs.changed == 'true'
+        run: npm install
+
+      - name: Build (safety gate — nothing pushes if this fails)
+        if: steps.check.outputs.changed == 'true'
+        run: npm run build
+
+      - name: Push to main (triggers the live Vercel deploy)
+        if: steps.check.outputs.changed == 'true'
+        run: git push origin main
