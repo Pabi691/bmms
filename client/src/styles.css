@@ -19,6 +19,8 @@ html[data-theme='dark'] {
         linear-gradient(165deg, #090a13 0%, #06070d 55%, #08090f 100%);
   --text: #eef0f9;
   --muted: #8991b3;
+  --icon-muted: #8991b3;
+  --icon-hover: #eef0f9;
   --glass: rgba(255, 255, 255, 0.06);
   --glass-strong: rgba(255, 255, 255, 0.11);
   --border: rgba(255, 255, 255, 0.11);
@@ -36,6 +38,8 @@ html[data-theme='light'] {
         linear-gradient(165deg, #f4f6fc 0%, #eef1f7 100%);
   --text: #1c2338;
   --muted: #5d6784;
+  --icon-muted: #435071;
+  --icon-hover: #0a78e8;
   --glass: rgba(255, 255, 255, 0.42);
   --glass-strong: rgba(255, 255, 255, 0.62);
   --border: rgba(28, 35, 56, 0.13);
@@ -103,10 +107,10 @@ html { scroll-behavior: smooth; }
 .navlink {
   position: relative; display: flex; align-items: center; justify-content: center;
   width: 44px; height: 44px; border-radius: 50%;
-  color: var(--muted); transition: var(--transition);
+  color: var(--icon-muted); transition: var(--transition);
   border: none; background: none; padding: 0; font: inherit; /* also used as a <button> (e.g. sign out) */
 }
-.navlink:hover { background: var(--glass); color: var(--text); }
+.navlink:hover { background: var(--glass); color: var(--icon-hover); }
 .navlink.active {
   background: linear-gradient(135deg, #29d3ff, #0a78e8); color: #fff;
   box-shadow: 0 4px 14px rgba(10,120,232,.45);
@@ -164,15 +168,37 @@ html[data-theme='light'] .logo-img.for-light { display: block; }
   padding: 8px 6px calc(8px + env(safe-area-inset-bottom));
   justify-content: space-around;
 }
-.bottomnav a { display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 10.5px; color: var(--muted); padding: 6px 10px; border-radius: 14px; min-width: 56px; transition: var(--transition); }
-.bottomnav a.active { color: var(--text); background: var(--glass-strong); box-shadow: 0 0 16px rgba(10,120,232,.22); }
-.bottomnav svg { width: 21px; height: 21px; }
+.bottomnav a, .bottomnav button { display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 10.5px; color: var(--muted); padding: 6px 10px; border-radius: 14px; min-width: 56px; transition: var(--transition); background: none; border: none; font-family: inherit; cursor: pointer; }
+.bottomnav a.active, .bottomnav button.active { color: var(--text); background: var(--glass-strong); box-shadow: 0 0 16px rgba(10,120,232,.22); }
+.bottomnav svg { width: 21px; height: 21px; color: var(--icon-muted); }
+.bottomnav a.active svg, .bottomnav button.active svg { color: inherit; }
+
+/* mobile bottom-nav overflow ("More") — a small sheet listing links that
+   don't fit in the 5-tab bar, anchored just above it */
+.bottomnav-more-overlay {
+  display: none; position: fixed; inset: 0; z-index: 39; background: rgba(0,0,0,.35);
+}
+.bottomnav-more-sheet {
+  position: fixed; left: 12px; right: 12px; bottom: calc(12px + 64px + env(safe-area-inset-bottom));
+  background: var(--nav-bg); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+  border: 1px solid var(--border); border-radius: 18px; box-shadow: var(--shadow);
+  padding: 8px; display: flex; flex-direction: column; gap: 2px;
+}
+.bottomnav-more-row {
+  display: flex; align-items: center; gap: 12px; padding: 12px 10px; border-radius: 12px;
+  color: var(--text); font-size: 14px; transition: var(--transition);
+}
+.bottomnav-more-row svg { width: 20px; height: 20px; color: var(--icon-muted); flex-shrink: 0; }
+.bottomnav-more-row:hover { background: var(--glass); }
+.bottomnav-more-row.active { background: var(--glass-strong); }
+.bottomnav-more-row.active svg { color: var(--adv); }
 
 .mobile-theme { display: none; }
 
 @media (max-width: 860px) {
   .sidebar { display: none; }
   .bottomnav { display: flex; }
+  .bottomnav-more-overlay { display: block; }
   .mobile-theme { display: inline-flex; }
   .main { padding-top: 16px; }
 }
@@ -333,7 +359,7 @@ html[data-theme='light'] .card-hover:hover { box-shadow: 0 14px 34px rgba(50,60,
 .switch.on .track { background: linear-gradient(135deg, #29d3ff, #0a78e8); box-shadow: inset 0 0 0 1px transparent; }
 .switch.on .track::after { transform: translateX(calc(var(--sw-w) - var(--sw-h))); }
 .switch .sw-label { font-size: 13px; font-weight: 600; color: var(--muted); }
-.switch .sw-icon { display: flex; color: var(--muted); }
+.switch .sw-icon { display: flex; color: var(--icon-muted); }
 .switch .sw-icon svg { width: 15px; height: 15px; }
 
 /* ---------- controls ---------- */
@@ -460,7 +486,7 @@ table.data tr:hover td { background: var(--glass); }
 .dbh-name-block h1 { margin: 0; font-family: var(--font-display); font-size: 19px; line-height: 1.25; text-wrap: balance; }
 .dbh-name-block .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
 .dbh-toggle-row { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
-.dbh-toggle-row svg { width: 17px; height: 17px; color: var(--muted); }
+.dbh-toggle-row svg { width: 17px; height: 17px; color: var(--icon-muted); }
 .dbh-more-wrap { position: relative; }
 .dbh-more-wrap .filter-menu { min-width: 176px; }
 .dbh-row2 { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
@@ -565,7 +591,7 @@ table.data tr:hover td { background: var(--glass); }
   background: var(--glass-strong); border: 1px solid var(--border); color: var(--text); font-weight: 600; font-size: 13.5px;
 }
 .month-picker-btn svg:first-child { width: 16px; height: 16px; color: var(--dh-blue); flex-shrink: 0; }
-.month-picker-btn svg:last-child { width: 14px; height: 14px; color: var(--muted); transform: rotate(90deg); flex-shrink: 0; }
+.month-picker-btn svg:last-child { width: 14px; height: 14px; color: var(--icon-muted); transform: rotate(90deg); flex-shrink: 0; }
 .month-picker-menu {
   position: absolute; top: calc(100% + 8px); right: 0; z-index: 30; width: 264px;
   background: var(--nav-bg); border: 1px solid var(--border); border-radius: 16px;
@@ -641,7 +667,7 @@ table.data tr:hover td { background: var(--glass); }
 .dh-mini-body { flex: 1; min-width: 0; }
 .dh-mini-label { color: var(--muted); font-size: 12px; }
 .dh-mini-value { font-family: var(--font-display); font-weight: 700; font-size: 17px; margin-top: 2px; font-variant-numeric: tabular-nums; }
-.dh-mini-arrow { width: 28px; height: 28px; border-radius: 50%; background: var(--glass-strong); flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); }
+.dh-mini-arrow { width: 28px; height: 28px; border-radius: 50%; background: var(--glass-strong); flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: var(--icon-muted); }
 .dh-mini-arrow svg { width: 14px; height: 14px; }
 
 /* ---------- footer ---------- */

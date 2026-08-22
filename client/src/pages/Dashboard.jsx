@@ -77,6 +77,11 @@ export default function Dashboard() {
   const dueCount = s.flatStates.length - paidCount - partCount;
   const pct = (n) => (s.flatStates.length ? (n / s.flatStates.length) * 100 : 0);
   const collectionPct = t.expected > 0 ? Math.round((t.collectedMonth / t.expected) * 100) : 0;
+  // Everything currently owed to the society: this month's due across every
+  // flat, plus any Previous Pending (old arrears) still outstanding —
+  // t.pendingMonth itself stays untouched (the Google Sheets export's
+  // "Pending (this month)" line depends on it meaning exactly that).
+  const totalPending = t.pendingMonth + t.previousPendingTotal;
 
   const byNumber = (a, b) => String(a.number).localeCompare(String(b.number), undefined, { numeric: true });
   const paidFlats = s.flatStates.filter((f) => f.status === 'paid').sort(byNumber);
@@ -155,12 +160,14 @@ export default function Dashboard() {
       </div>
     </div>
   );
-
   const miniCards = [
     { label: 'Total Flats', value: t.flats, icon: Icons.building, tone: 'tone-blue', to: `/b/${buildingId}/flats` },
     { label: 'Cash Balance', value: inr(t.cash), icon: Icons.wallet, tone: 'tone-teal', to: `/b/${buildingId}/payments` },
     { label: 'Bank Balance', value: inr(t.bank), icon: Icons.bank, tone: 'tone-blue', to: `/b/${buildingId}/payments` },
-    { label: 'Total Pending', value: inr(t.pendingMonth), icon: Icons.clock, tone: 'tone-violet', to: `/b/${buildingId}/payments` },
+    // Kept simple and monthly-only, matching its 3 siblings above — the
+    // combined current+previous total lives on the "Total Pending" hero
+    // card instead.
+    { label: 'Pending This Month', value: inr(t.pendingMonth), icon: Icons.clock, tone: 'tone-violet', to: `/b/${buildingId}/payments` },
   ];
 
   return (
@@ -168,9 +175,9 @@ export default function Dashboard() {
       <div className="dh-hero-row">
         <div className="dh-hero-card">
           <div className="dh-hero-icon tone-blue">{Icons.bank}</div>
-          <div className="dh-hero-label">Available Bank Balance</div>
+          <div className="dh-hero-label">Total Balance</div>
           <div className="dh-hero-value num">{inr(t.availableBalance)}</div>
-          <div className="dh-hero-sub">Current balance in bank</div>
+          <div className="dh-hero-sub">Total balance of the building — cash + bank</div>
           <TrendWave values={bankTrend} color="var(--dh-blue)" dot />
         </div>
 
@@ -185,8 +192,8 @@ export default function Dashboard() {
 
         <div className="dh-hero-card">
           <div className="dh-hero-icon tone-violet">{Icons.clock}</div>
-          <div className="dh-hero-label">Pending This Month</div>
-          <div className="dh-hero-value num">{inr(t.pendingMonth)}</div>
+          <div className="dh-hero-label">Total Pending</div>
+          <div className="dh-hero-value num" style={{ color: 'var(--bad)' }}>{inr(totalPending)}</div>
           <div className="dh-hero-sub">Amount yet to be collected</div>
           <TrendWave values={pendingTrend} color="var(--dh-violet)" />
         </div>
@@ -224,6 +231,30 @@ export default function Dashboard() {
           </Link>
         ))}
       </div>
+
+      {/* Only ever rendered once a building admin has recorded at least one
+          investment (Investments.jsx) — every other building's dashboard
+          ends this section here, exactly as it did before. */}
+      {t.investedBalance > 0 && (
+        <div className="dh-mini-row" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
+          <Link to={`/b/${buildingId}/investments`} className="dh-mini-card">
+            <div className="dh-mini-icon tone-teal">{Icons.wallet}</div>
+            <div className="dh-mini-body">
+              <div className="dh-mini-label">Available Balance</div>
+              <div className="dh-mini-value num">{inr(t.availableBalance)}</div>
+            </div>
+            <span className="dh-mini-arrow">{Icons.chevronRight}</span>
+          </Link>
+          <Link to={`/b/${buildingId}/investments`} className="dh-mini-card">
+            <div className="dh-mini-icon tone-violet">{Icons.trendUp}</div>
+            <div className="dh-mini-body">
+              <div className="dh-mini-label">Invested Balance</div>
+              <div className="dh-mini-value num">{inr(t.investedBalance)}</div>
+            </div>
+            <span className="dh-mini-arrow">{Icons.chevronRight}</span>
+          </Link>
+        </div>
+      )}
 
       <div className="dh-lists-row">
         <div className="glass dh-list-card">

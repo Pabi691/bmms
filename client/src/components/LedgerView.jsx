@@ -143,9 +143,42 @@ export default function LedgerView({ data }) {
   const years = [...new Set(monthlyRows.map((r) => r.year))];
   const s = data.summary;
   const hasCredit = s.currentCreditAvailable > 0 || data.ledger.some((r) => r.source === 'credit');
+  // Only present when an admin has entered a Previous Pending record for
+  // this flat — an entirely separate pool from everything else on this
+  // page (see the note atop previousDueSummary() in finance.js).
+  const prevDue = data.previousDue?.active ? data.previousDue : null;
 
   return (
     <>
+      {prevDue && (
+        <div className="glass" style={{ padding: 18, marginBottom: 16, borderColor: 'var(--bad)' }}>
+          <h3 style={{ marginTop: 0, marginBottom: 10, fontSize: 15 }}>Previous Pending</h3>
+          <div className="grid stats" style={{ marginBottom: 14 }}>
+            <div className="glass stat accent-bad"><div className="label">Remaining</div><div className="value num">{inr(prevDue.totals.remaining)}</div></div>
+            <div className="glass stat"><div className="label">Entered</div><div className="value num">{inr(prevDue.totals.entered)}</div></div>
+            <div className="glass stat accent-ok"><div className="label">Paid so far</div><div className="value num">{inr(prevDue.totals.paid)}</div></div>
+          </div>
+          <div className="list">
+            {prevDue.rows.map((r) => (
+              <div key={r.id} className="glass" style={{ padding: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                  <strong>{r.category === 'maintenance' ? `${r.months} months maintenance` : r.label}</strong>
+                  <span className={'chip ' + (r.status === 'cleared' ? 'paid' : r.status === 'partially_paid' ? 'partial' : 'due')}>
+                    {r.status === 'cleared' ? 'Cleared' : r.status === 'partially_paid' ? 'Partially paid' : 'Pending'}
+                  </span>
+                </div>
+                {r.notes && <div className="mut" style={{ fontSize: 12.5, marginTop: 2 }}>{r.notes}</div>}
+                <div className="rc-meta num" style={{ marginTop: 6 }}>
+                  <span>Amount {inr(r.amount)}</span>
+                  <span style={{ color: 'var(--ok)' }}>Paid {inr(r.paidAmount)}</span>
+                  <span style={{ color: r.remaining > 0 ? 'var(--bad)' : 'var(--muted)' }}>Remaining {inr(r.remaining)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="grid stats" style={{ marginBottom: 16 }}>
         <div className={'glass stat ' + (s.currentDue > 0 ? 'accent-bad' : '')}><div className="label">Current due</div><div className="value num">{inr(s.currentDue)}</div></div>
         {hasCredit ? (

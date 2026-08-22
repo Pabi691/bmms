@@ -15,6 +15,7 @@ import Ledger from './pages/Ledger.jsx';
 import Payments from './pages/Payments.jsx';
 import Expenses from './pages/Expenses.jsx';
 import Funds from './pages/Funds.jsx';
+import Investments from './pages/Investments.jsx';
 import Sheets from './pages/Sheets.jsx';
 import Notices from './pages/Notices.jsx';
 import PaymentApprovals from './pages/PaymentApprovals.jsx';
@@ -61,6 +62,7 @@ export default function App() {
           <Route path="/b/:buildingId/approvals" element={<Guard roles={['building_admin', 'master_admin']}><PaymentApprovals /></Guard>} />
           <Route path="/b/:buildingId/expenses" element={<Guard roles={['building_admin', 'master_admin']}><Expenses /></Guard>} />
           <Route path="/b/:buildingId/funds" element={<Guard roles={['building_admin', 'master_admin']}><Funds /></Guard>} />
+          <Route path="/b/:buildingId/investments" element={<Guard roles={['building_admin', 'master_admin']}><Investments /></Guard>} />
           <Route path="/b/:buildingId/notices" element={<Guard roles={['building_admin', 'master_admin']}><Notices /></Guard>} />
           <Route path="/b/:buildingId/sheets" element={<Guard roles={['building_admin', 'master_admin']}><Sheets /></Guard>} />
 

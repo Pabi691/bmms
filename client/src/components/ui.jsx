@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
-import { NavLink, useParams, Link } from 'react-router-dom';
+import { NavLink, useParams, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../auth.jsx';
 import logoDark from '../assets/logo-dark.webp';
 import logoLight from '../assets/logo-light.webp';
@@ -170,6 +170,8 @@ export function MoreMenu({ items, icon, label = 'More', triggerClassName = 'btn 
 export function Layout({ children, title, sub, actions, backTo, navOverride, mobileHeader, headerIcon, more, mobileExtra, customHeader }) {
   const { buildingId } = useParams();
   const { logout } = useAuth();
+  const location = useLocation();
+  const [moreOpen, setMoreOpen] = useState(false);
   const links = navOverride || (buildingId
     ? [
         { to: `/b/${buildingId}`, label: 'Dashboard', icon: Icons.home, end: true },
@@ -178,6 +180,7 @@ export function Layout({ children, title, sub, actions, backTo, navOverride, mob
         { to: `/b/${buildingId}/approvals`, label: 'Payment approvals', icon: Icons.check, short: 'Approvals' },
         { to: `/b/${buildingId}/expenses`, label: 'Expenses', icon: Icons.expense },
         { to: `/b/${buildingId}/funds`, label: 'Emergency fund', icon: Icons.fund, short: 'Fund' },
+        { to: `/b/${buildingId}/investments`, label: 'Investments', icon: Icons.trendUp, short: 'Invest' },
         { to: `/b/${buildingId}/notices`, label: 'Notices', icon: Icons.bell },
         { to: `/b/${buildingId}/sheets`, label: 'Google Sheet', icon: Icons.sheet, short: 'Sheet' },
       ]
@@ -254,13 +257,39 @@ export function Layout({ children, title, sub, actions, backTo, navOverride, mob
         {children}
       </main>
 
-      <nav className="bottomnav">
-        {links.slice(0, 5).map((l) => (
-          <NavLink key={l.to} to={l.to} end={l.end} className={({ isActive }) => (isActive ? 'active' : '')}>
-            {l.icon}<span>{l.short || l.label}</span>
-          </NavLink>
-        ))}
-      </nav>
+      {(() => {
+        const primaryLinks = links.length > 5 ? links.slice(0, 4) : links;
+        const overflowLinks = links.length > 5 ? links.slice(4) : [];
+        const overflowActive = overflowLinks.some((l) => l.end ? location.pathname === l.to : location.pathname.startsWith(l.to));
+        return (
+          <>
+            {moreOpen && overflowLinks.length > 0 && (
+              <div className="bottomnav-more-overlay" onClick={() => setMoreOpen(false)}>
+                <div className="bottomnav-more-sheet" onClick={(e) => e.stopPropagation()}>
+                  {overflowLinks.map((l) => (
+                    <NavLink key={l.to} to={l.to} end={l.end} onClick={() => setMoreOpen(false)}
+                      className={({ isActive }) => 'bottomnav-more-row' + (isActive ? ' active' : '')}>
+                      {l.icon}<span>{l.label}</span>
+                    </NavLink>
+                  ))}
+                </div>
+              </div>
+            )}
+            <nav className="bottomnav">
+              {primaryLinks.map((l) => (
+                <NavLink key={l.to} to={l.to} end={l.end} className={({ isActive }) => (isActive ? 'active' : '')}>
+                  {l.icon}<span>{l.short || l.label}</span>
+                </NavLink>
+              ))}
+              {overflowLinks.length > 0 && (
+                <button type="button" className={overflowActive ? 'active' : ''} onClick={() => setMoreOpen((o) => !o)}>
+                  {Icons.more}<span>More</span>
+                </button>
+              )}
+            </nav>
+          </>
+        );
+      })()}
     </div>
   );
 }

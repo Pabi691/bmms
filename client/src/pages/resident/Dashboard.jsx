@@ -62,6 +62,7 @@ export default function ResidentDashboard() {
   const [notices, setNotices] = useState([]);
   const [payments, setPayments] = useState([]);
   const [ledger, setLedger] = useState(null);
+  const [previousDue, setPreviousDue] = useState(null);
   const nav = useNavigate();
   const toast = useToast();
   const { logout } = useAuth();
@@ -74,6 +75,9 @@ export default function ResidentDashboard() {
     api.get('/me/payments').then(setPayments).catch(() => {});
     api.get('/me/ledger').then((l) => setLedger(l.ledger)).catch(() => {});
     api.get('/me/building-payment-info').then((b) => setBuildingName(b.name)).catch(() => {});
+    // Stays null for every flat without an admin-flagged Previous Pending
+    // balance — the Outstanding Summary card below only renders when set.
+    api.get('/me/previous-dues').then((d) => setPreviousDue(d.active ? d : null)).catch(() => {});
   }, []);
 
   if (!flat || !month) return <Layout customHeader={<DashboardSkeleton />} navOverride={residentNavLinks()} />;
@@ -195,6 +199,38 @@ export default function ResidentDashboard() {
           <div className="dh-progress-line">Collection Progress <strong>{collectionPct}%</strong> {Icons.trendUp}</div>
         </div>
       </div>
+
+      {/* Only ever rendered once a building admin has entered a Previous
+          Pending record for this flat — every other resident's dashboard
+          ends here, unchanged. */}
+      {previousDue && (
+        <div className="glass dh-flatwise" style={{ marginBottom: 16 }}>
+          <div className="dh-flatwise-head">
+            <strong className="dh-flatwise-title"><span className="dh-title-bar dh-title-bar-due" />Outstanding Summary</strong>
+          </div>
+          <div className="dh-legend" style={{ marginBottom: 12 }}>
+            <span><i className="dot dot-due" />Previous Pending {inr(previousDue.totals.remaining)}</span>
+            <span><i className="dot dot-partial" />Current Maintenance {inr(month.due)}</span>
+          </div>
+          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>
+            Total Outstanding <span className="num">{inr(previousDue.totals.remaining + month.due)}</span>
+          </div>
+          <div className="dh-flat-list">
+            {previousDue.rows.filter((r) => r.remaining > 0).map((r) => (
+              <div key={r.id} className="dh-flat-row">
+                <div className="dh-flat-icon tone-violet">{Icons.history}</div>
+                <div className="dh-flat-info">
+                  <div className="dh-flat-number">{r.category === 'maintenance' ? `${r.months} months maintenance` : r.label}</div>
+                  <div className="dh-flat-resident">{r.notes || (r.category === 'maintenance' ? `${r.months} months pending` : r.label)}</div>
+                </div>
+                <div className="dh-flat-right">
+                  <div className="dh-flat-amount num">{inr(r.remaining)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="dh-mini-row">
         {miniCards.map((c) => (

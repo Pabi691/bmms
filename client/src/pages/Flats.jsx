@@ -15,6 +15,7 @@ export default function Flats() {
   const [sort, setSort] = useState('number');
   const [form, setForm] = useState(params.get('add') ? { ...blank } : null);
   const [loginFlat, setLoginFlat] = useState(null); // flat being managed in the resident-login modal
+  const [pendingFlat, setPendingFlat] = useState(null); // flat being managed in the Previous Pending modal
   const toast = useToast();
 
   const load = () => {
@@ -105,6 +106,7 @@ export default function Flats() {
                 <td className="t-right num" style={{ color: f.advance > 0 ? 'var(--adv)' : 'inherit' }}>{inr(f.advance)}</td>
                 <td className="t-right" style={{ whiteSpace: 'nowrap' }}>
                   <Link className="btn sm icon-only" to={`/b/${buildingId}/flats/${f.id}/ledger`} data-label="Ledger" aria-label="Ledger">{Icons.ledger}</Link>{' '}
+                  <button className="btn sm icon-only" onClick={() => setPendingFlat(f)} data-label="Previous Pending" aria-label="Previous Pending">{Icons.history}</button>{' '}
                   <button className="btn sm icon-only" onClick={() => setLoginFlat(f)} data-label="Resident login" aria-label="Resident login">{Icons.user}</button>{' '}
                   <button className="btn sm icon-only" onClick={() => openEdit(f)} data-label="Edit" aria-label="Edit">{Icons.edit}</button>{' '}
                   <button className="btn sm icon-only danger" onClick={() => archive(f)} data-label="Archive" aria-label="Archive">{Icons.archive}</button>{' '}
@@ -134,6 +136,7 @@ export default function Flats() {
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <Link className="btn sm icon-only" to={`/b/${buildingId}/flats/${f.id}/ledger`} data-label="Ledger" aria-label="Ledger">{Icons.ledger}</Link>
+              <button className="btn sm icon-only" onClick={() => setPendingFlat(f)} data-label="Previous Pending" aria-label="Previous Pending">{Icons.history}</button>
               <button className="btn sm icon-only" onClick={() => setLoginFlat(f)} data-label="Resident login" aria-label="Resident login">{Icons.user}</button>
               <button className="btn sm icon-only" onClick={() => openEdit(f)} data-label="Edit" aria-label="Edit">{Icons.edit}</button>
               <button className="btn sm icon-only danger" onClick={() => archive(f)} data-label="Archive" aria-label="Archive">{Icons.archive}</button>
@@ -181,7 +184,121 @@ export default function Flats() {
 
       <ResidentLoginModal flat={loginFlat} resident={loginFlat ? residentByFlat.get(loginFlat.id) : null}
         onClose={() => setLoginFlat(null)} onChange={load} />
+      <PreviousPendingModal flat={pendingFlat} onClose={() => setPendingFlat(null)} />
     </Layout>
+  );
+}
+
+const PREV_STATUS_TONE = { active: 'due', partially_paid: 'partial', cleared: 'paid' };
+
+// Old/pre-existing arrears from before the flat started using this
+// software — entirely separate pool from the flat's normal monthly
+// maintenance due (see recordPaymentWithPreviousDue in finance.js). Hidden
+// everywhere else in the app unless this modal has been used to add one.
+function PreviousPendingModal({ flat, onClose }) {
+  const toast = useToast();
+  const [summary, setSummary] = useState(null);
+  const [form, setForm] = useState(null);
+
+  const load = () => {
+    if (!flat) return;
+    api.get(`/flats/${flat.id}/previous-dues`).then(setSummary).catch((e) => toast(e.message));
+  };
+  useEffect(() => { setSummary(null); setForm(null); load(); }, [flat]);
+
+  if (!flat) return null;
+
+  const startAdd = () => setForm({ category: 'maintenance', months: '', monthly_amount: flat.monthly_amount || '', label: '', amount: '', notes: '' });
+
+  const save = async (e) => {
+    e.preventDefault();
+    try {
+      await api.post(`/flats/${flat.id}/previous-dues`, form);
+      toast('Previous Pending entry added');
+      setForm(null); load();
+    } catch (err) { toast(err.message); }
+  };
+
+  const remove = async (entry) => {
+    if (!confirm(`Remove this ${inr(entry.amount)} Previous Pending entry?`)) return;
+    try {
+      await api.del(`/previous-dues/${entry.id}`);
+      toast('Entry removed'); load();
+    } catch (err) { toast(err.message); }
+  };
+
+  return (
+    <Modal open={!!flat} onClose={onClose} title={`Flat ${flat.number} · Previous Pending`}>
+      {summary && summary.rows.length > 0 && (
+        <>
+          <div className="glass" style={{ padding: 12, marginBottom: 14, display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, fontSize: 13.5 }}>
+            <span>Entered <b className="num">{inr(summary.totals.entered)}</b></span>
+            <span>Paid <b className="num" style={{ color: 'var(--ok)' }}>{inr(summary.totals.paid)}</b></span>
+            <span>Remaining <b className="num" style={{ color: summary.totals.remaining > 0 ? 'var(--bad)' : 'var(--ok)' }}>{inr(summary.totals.remaining)}</b></span>
+          </div>
+          <div className="list" style={{ marginBottom: 14 }}>
+            {summary.rows.map((r) => (
+              <div key={r.id} className="glass" style={{ padding: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                  <strong>{r.category === 'maintenance' ? `${r.months} months maintenance` : r.label}</strong>
+                  <StatusChip status={PREV_STATUS_TONE[r.status]} />
+                </div>
+                {r.notes && <div className="mut" style={{ fontSize: 12, marginTop: 2 }}>{r.notes}</div>}
+                <div className="rc-meta num" style={{ marginTop: 6 }}>
+                  <span>Amount {inr(r.amount)}</span>
+                  <span style={{ color: 'var(--ok)' }}>Paid {inr(r.paidAmount)}</span>
+                  <span style={{ color: r.remaining > 0 ? 'var(--bad)' : 'var(--muted)' }}>Remaining {inr(r.remaining)}</span>
+                </div>
+                {r.status === 'active' && (
+                  <button className="btn sm icon-only danger" style={{ marginTop: 8 }} onClick={() => remove(r)} data-label="Remove" aria-label="Remove">{Icons.trash}</button>
+                )}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+      {summary && summary.rows.length === 0 && !form && (
+        <div className="mut" style={{ marginBottom: 14 }}>No Previous Pending recorded for this flat.</div>
+      )}
+
+      {!form ? (
+        <button className="btn primary" onClick={startAdd}>+ Add Previous Pending</button>
+      ) : (
+        <form onSubmit={save} style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+          <div className="field"><label>Category *</label>
+            <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
+              <option value="maintenance">Maintenance (months × rate)</option>
+              <option value="other">Other</option>
+            </select></div>
+          {form.category === 'maintenance' ? (
+            <>
+              <div className="form-row">
+                <div className="field"><label>Pending months *</label>
+                  <input required type="number" min="1" step="1" value={form.months} onChange={(e) => setForm({ ...form, months: e.target.value })} /></div>
+                <div className="field"><label>Monthly amount (₹) *</label>
+                  <input required type="number" min="0.01" step="0.01" value={form.monthly_amount} onChange={(e) => setForm({ ...form, monthly_amount: e.target.value })} /></div>
+              </div>
+              {Number(form.months) > 0 && Number(form.monthly_amount) > 0 && (
+                <div className="mut" style={{ fontSize: 12.5, marginBottom: 10 }}>Total: {inr(Number(form.months) * Number(form.monthly_amount))}</div>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="field"><label>Label *</label>
+                <input required value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} placeholder="e.g. Lift Maintenance" /></div>
+              <div className="field"><label>Amount (₹) *</label>
+                <input required type="number" min="0.01" step="0.01" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></div>
+            </>
+          )}
+          <div className="field"><label>Notes</label>
+            <input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="e.g. 6 months maintenance pending" /></div>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+            <button type="button" className="btn" onClick={() => setForm(null)}>Cancel</button>
+            <button className="btn primary">Add entry</button>
+          </div>
+        </form>
+      )}
+    </Modal>
   );
 }
 

@@ -3,6 +3,8 @@ import db, { toPaise, toRupees, audit } from '../db.js';
 import {
   buildingSummary, flatLedger, recordPayment, recordPaymentWithAdjustment, editPayment, deletePayment,
   applyAdvance, monthState, advanceBalance, residentCreditSummary, revokeResidentCredit, ADJUSTMENT_CATEGORIES,
+  previousDueSummary, recordPreviousDue, deletePreviousDue, recordPaymentWithPreviousDue, recordAdjustment,
+  investmentSummary, recordInvestment, redeemInvestment, deleteInvestment,
 } from '../services/finance.js';
 import { syncBuilding, autoSync } from '../services/sheets.js';
 import { need, asyncHandler } from '../middleware/validate.js';
@@ -193,6 +195,39 @@ r.post('/resident-credits/:id/revoke', requireRole('building_admin', 'master_adm
   res.json({ ok: true });
 }));
 
+// ---------------- previous pending dues (pre-existing arrears) ----------------
+r.get('/flats/:id/previous-dues', requireRole('building_admin', 'master_admin'), asyncHandler(async (req, res) => {
+  const f = await loadScoped(req, (id) => db.prepare('SELECT * FROM flats WHERE id=?').get(id), req.params.id);
+  res.json(await previousDueSummary(f.id));
+}));
+
+r.post('/flats/:id/previous-dues', requireRole('building_admin', 'master_admin'), asyncHandler(async (req, res) => {
+  const f = await loadScoped(req, (id) => db.prepare('SELECT * FROM flats WHERE id=?').get(id), req.params.id);
+  const { category, months, monthly_amount, label, amount, notes } = req.body;
+  const tx = await db.transaction();
+  let result;
+  try {
+    result = await recordPreviousDue(tx, {
+      flat_id: f.id, category, months,
+      monthly_amount: monthly_amount !== undefined && monthly_amount !== '' ? toPaise(monthly_amount) : null,
+      label, amount: amount !== undefined && amount !== '' ? toPaise(amount) : null,
+      notes, actor_user_id: req.user.id,
+    });
+    await tx.commit();
+  } catch (e) { await tx.rollback(); throw e; }
+  res.status(201).json(result);
+}));
+
+r.delete('/previous-dues/:id', requireRole('building_admin', 'master_admin'), asyncHandler(async (req, res) => {
+  const entry = await loadScoped(req, (id) => db.prepare('SELECT * FROM previous_dues WHERE id=? AND deleted=0').get(id), req.params.id);
+  const tx = await db.transaction();
+  try {
+    await deletePreviousDue(tx, entry.id, req.user.id);
+    await tx.commit();
+  } catch (e) { await tx.rollback(); throw e; }
+  res.json({ ok: true });
+}));
+
 // ---------------- payments & advance ----------------
 r.get('/buildings/:id/payments', requireRole('building_admin', 'master_admin'), asyncHandler(async (req, res) => {
   assertBuildingAccess(req, req.params.id);
@@ -224,14 +259,36 @@ r.post('/payments', requireRole('building_admin', 'master_admin'), asyncHandler(
     };
   }
 
+  // Only set for a flat with an active Previous Pending balance (see
+  // Flats.jsx) — every other call site never sends this, so `result` below
+  // is produced by the exact same recordPaymentWithAdjustment call as
+  // before this field existed.
+  const previousDueAmount = req.body.previous_due_amount !== undefined && req.body.previous_due_amount !== null && req.body.previous_due_amount !== ''
+    ? toPaise(req.body.previous_due_amount) : 0;
+
   const tx = await db.transaction();
   let result;
   try {
-    result = await recordPaymentWithAdjustment(tx, {
-      flat_id: flat.id, month: Number(req.body.month), year: Number(req.body.year),
-      paid_on: req.body.paid_on, method: req.body.method, notes: req.body.notes,
-      bank_amount: bankAmount, adjustment, actor_user_id: req.user.id,
-    });
+    if (previousDueAmount > 0) {
+      result = { payment: null, credit: null };
+      if (adjustment?.amount > 0) {
+        result.credit = await recordAdjustment(tx, {
+          flat_id: flat.id, month: Number(req.body.month), year: Number(req.body.year), paid_on: req.body.paid_on,
+          actor_user_id: req.user.id, category: adjustment.category, custom_title: adjustment.custom_title, amount: adjustment.amount,
+        });
+      }
+      result.payment = await recordPaymentWithPreviousDue(tx, {
+        flat_id: flat.id, month: Number(req.body.month), year: Number(req.body.year),
+        current_amount: bankAmount, previous_due_amount: previousDueAmount,
+        method: req.body.method, paid_on: req.body.paid_on, notes: req.body.notes, actor_user_id: req.user.id,
+      });
+    } else {
+      result = await recordPaymentWithAdjustment(tx, {
+        flat_id: flat.id, month: Number(req.body.month), year: Number(req.body.year),
+        paid_on: req.body.paid_on, method: req.body.method, notes: req.body.notes,
+        bank_amount: bankAmount, adjustment, actor_user_id: req.user.id,
+      });
+    }
     await tx.commit();
   } catch (e) { await tx.rollback(); throw e; }
   autoSync(flat.building_id);
@@ -241,8 +298,18 @@ r.post('/payments', requireRole('building_admin', 'master_admin'), asyncHandler(
   });
 }));
 
+// Payments with a Previous Pending allocation can't go through edit/delete
+// yet — editPayment/deletePayment don't know how to reconstruct or reverse
+// that split. Every payment that predates this feature has no such row, so
+// this check is always false for them and both routes behave exactly as before.
+const hasPreviousDueAllocation = async (paymentId) =>
+  !!(await db.prepare('SELECT 1 FROM previous_due_payments WHERE payment_id=? AND deleted=0').get(paymentId));
+
 r.put('/payments/:id', requireRole('building_admin', 'master_admin'), asyncHandler(async (req, res) => {
   await loadScoped(req, (id) => db.prepare('SELECT * FROM payments WHERE id=?').get(id), req.params.id);
+  if (await hasPreviousDueAllocation(req.params.id)) {
+    throw Object.assign(new Error("This payment includes a Previous Pending allocation — editing it isn't supported yet"), { status: 400 });
+  }
   const patch = { ...req.body };
   if (patch.amount !== undefined) patch.amount = toPaise(patch.amount);
   if (patch.method) checkMethod(patch.method);
@@ -257,6 +324,9 @@ r.put('/payments/:id', requireRole('building_admin', 'master_admin'), asyncHandl
 
 r.delete('/payments/:id', requireRole('building_admin', 'master_admin'), asyncHandler(async (req, res) => {
   await loadScoped(req, (id) => db.prepare('SELECT * FROM payments WHERE id=?').get(id), req.params.id);
+  if (await hasPreviousDueAllocation(req.params.id)) {
+    throw Object.assign(new Error("This payment includes a Previous Pending allocation — deleting it isn't supported yet"), { status: 400 });
+  }
   const tx = await db.transaction();
   try {
     await deletePayment(tx, Number(req.params.id), req.user.id);
@@ -376,6 +446,55 @@ r.post('/funds/:id/transactions', requireRole('building_admin', 'master_admin'),
   await audit(fund.building_id, 'create', 'fund_tx', info.lastInsertRowid, `${req.body.type} ₹${req.body.amount} — ${fund.name}`, req.user.id);
   autoSync(fund.building_id);
   res.status(201).json({ id: info.lastInsertRowid });
+}));
+
+// ---------------- investments (FDs / society investments) ----------------
+r.get('/buildings/:id/investments', requireRole('building_admin', 'master_admin'), asyncHandler(async (req, res) => {
+  assertBuildingAccess(req, req.params.id);
+  res.json(await investmentSummary(Number(req.params.id)));
+}));
+
+r.post('/buildings/:id/investments', requireRole('building_admin', 'master_admin'), asyncHandler(async (req, res) => {
+  assertBuildingAccess(req, req.params.id);
+  need(req.body, ['type', 'amount', 'source', 'invested_on']);
+  const tx = await db.transaction();
+  let result;
+  try {
+    result = await recordInvestment(tx, {
+      building_id: Number(req.params.id), type: req.body.type, amount: toPaise(req.body.amount),
+      source: req.body.source, invested_on: req.body.invested_on, reference: req.body.reference,
+      notes: req.body.notes, is_previous: !!req.body.is_previous, actor_user_id: req.user.id,
+    });
+    await tx.commit();
+  } catch (e) { await tx.rollback(); throw e; }
+  autoSync(Number(req.params.id));
+  res.status(201).json(result);
+}));
+
+r.post('/investments/:id/redeem', requireRole('building_admin', 'master_admin'), asyncHandler(async (req, res) => {
+  const inv = await loadScoped(req, (id) => db.prepare('SELECT * FROM investments WHERE id=? AND deleted=0').get(id), req.params.id);
+  need(req.body, ['redeemed_amount', 'redeemed_on', 'redeemed_source']);
+  const tx = await db.transaction();
+  try {
+    await redeemInvestment(tx, {
+      id: inv.id, redeemed_amount: toPaise(req.body.redeemed_amount), redeemed_on: req.body.redeemed_on,
+      redeemed_source: req.body.redeemed_source, redeemed_notes: req.body.redeemed_notes, actor_user_id: req.user.id,
+    });
+    await tx.commit();
+  } catch (e) { await tx.rollback(); throw e; }
+  autoSync(inv.building_id);
+  res.json({ ok: true });
+}));
+
+r.delete('/investments/:id', requireRole('building_admin', 'master_admin'), asyncHandler(async (req, res) => {
+  const inv = await loadScoped(req, (id) => db.prepare('SELECT * FROM investments WHERE id=? AND deleted=0').get(id), req.params.id);
+  const tx = await db.transaction();
+  try {
+    await deleteInvestment(tx, inv.id, req.user.id);
+    await tx.commit();
+  } catch (e) { await tx.rollback(); throw e; }
+  autoSync(inv.building_id);
+  res.json({ ok: true });
 }));
 
 // ---------------- payment info (bank/UPI/QR shown to residents when paying) ----------------

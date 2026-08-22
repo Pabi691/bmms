@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import db, { toRupees } from '../db.js';
-import { flatLedger, monthState, residentCreditSummary } from '../services/finance.js';
+import { flatLedger, monthState, residentCreditSummary, previousDueSummary } from '../services/finance.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { isNonEmptyString, asyncHandler } from '../middleware/validate.js';
 
@@ -18,6 +18,10 @@ r.get('/flat', asyncHandler(async (req, res) => {
 
 r.get('/ledger', asyncHandler(async (req, res) => {
   res.json(await flatLedger(req.user.flatId));
+}));
+
+r.get('/previous-dues', asyncHandler(async (req, res) => {
+  res.json(await previousDueSummary(req.user.flatId));
 }));
 
 r.get('/month-state', asyncHandler(async (req, res) => {

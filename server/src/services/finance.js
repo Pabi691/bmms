@@ -133,6 +133,10 @@ export async function deletePayment(tx, id, actorUserId = null) {
   if (!pay) throw err('Payment not found', 404);
   await tx.prepare('UPDATE payments SET deleted=1 WHERE id=?').run(id);
   await tx.prepare('UPDATE advance_tx SET deleted=1 WHERE payment_id=?').run(id);
+  // No-op for every payment that predates Previous Pending Dues (no such
+  // row exists to match) — reverses a previous-due allocation when one
+  // exists, so it doesn't stay stuck after its funding payment is deleted.
+  await tx.prepare('UPDATE previous_due_payments SET deleted=1 WHERE payment_id=?').run(id);
   await audit(pay.building_id, 'delete', 'payment', id, `Soft-deleted payment of ₹${toRupees(pay.amount)}`, actorUserId, tx);
 }
 
@@ -346,6 +350,8 @@ export async function buildingSummary(buildingId, month, year, x = db) {
     creditPendingR, creditRejectedR, creditApprovedR, creditAvailableR,
     series,
     recentPaymentsRaw, recentExpensesRaw,
+    prevDuesEnteredR, prevDuesPaidR,
+    investOutRows, investInRows, investedBalanceR,
   ] = await Promise.all([
     Promise.all(flats.map(async (f) => {
       const st = await monthState(f.id, month, year, x);
@@ -398,10 +404,28 @@ export async function buildingSummary(buildingId, month, year, x = db) {
       `SELECT p.*, f.number flat_number FROM payments p JOIN flats f ON f.id=p.flat_id
        WHERE p.building_id=? AND p.deleted=0 ORDER BY p.created_at DESC LIMIT 6`).all(buildingId),
     x.prepare('SELECT * FROM expenses WHERE building_id=? AND deleted=0 ORDER BY date DESC, id DESC LIMIT 6').all(buildingId),
+    // Building-wide Previous Pending remaining — entirely separate pool from
+    // pendingMonth above (see previousDueSummary()); kept as its own field
+    // rather than folded into pendingMonth so the Google Sheets export's
+    // "Pending (this month)" line (sheets.js) stays exactly what it says.
+    q('SELECT COALESCE(SUM(amount),0) s FROM previous_dues WHERE building_id=? AND deleted=0', buildingId),
+    q('SELECT COALESCE(SUM(amount),0) s FROM previous_due_payments WHERE building_id=? AND deleted=0', buildingId),
+    // Investment Management — money moved into a NEW investment leaves the
+    // operating account (excluded for is_previous=1, which never touched
+    // this software's balance to begin with); money returned from a
+    // redeemed investment comes back into it. `source`/`redeemed_source`
+    // are already exactly 'bank'/'cash', matching the bucket keys below
+    // directly — no methodBucket() translation needed. Empty for every
+    // building with no investments, leaving every existing number here
+    // byte-for-byte unchanged.
+    x.prepare("SELECT source, SUM(amount) s FROM investments WHERE building_id=? AND is_previous=0 AND deleted=0 GROUP BY source").all(buildingId),
+    x.prepare("SELECT redeemed_source, SUM(redeemed_amount) s FROM investments WHERE building_id=? AND status='redeemed' AND deleted=0 GROUP BY redeemed_source").all(buildingId),
+    q("SELECT COALESCE(SUM(amount),0) s FROM investments WHERE building_id=? AND status='active' AND deleted=0", buildingId),
   ]);
 
   const collectedMonth = flatStates.reduce((s, f) => s + f.paid, 0);
   const pendingMonth = flatStates.reduce((s, f) => s + f.due, 0);
+  const previousPendingTotal = Math.max(prevDuesEnteredR.s - prevDuesPaidR.s, 0);
 
   const totalPayments = totalPaymentsR.s, totalExpenses = totalExpensesR.s, realExpenses = realExpensesR.s;
   const fundIn = fundInR.s, fundOut = fundOutR.s, advTotal = advTotalR.s;
@@ -411,6 +435,10 @@ export async function buildingSummary(buildingId, month, year, x = db) {
   for (const r of fundInMethodRows) buckets[methodBucket(r.method)] += r.s;
   for (const r of expenseMethodRows) buckets[methodBucket(r.method)] -= r.s;
   for (const r of fundOutMethodRows) buckets[methodBucket(r.method)] -= r.s;
+  for (const r of investOutRows) buckets[r.source] -= r.s;
+  for (const r of investInRows) buckets[r.redeemed_source] += r.s;
+  const investedOutTotal = investOutRows.reduce((s, r) => s + r.s, 0);
+  const investedInTotal = investInRows.reduce((s, r) => s + r.s, 0);
 
   const monthIncome = monthIncomeR.s, monthExpense = monthExpenseR.s;
   const settledViaBankMonth = settledViaBankMonthR.s, settledViaCreditMonth = settledViaCreditMonthR.s;
@@ -431,7 +459,8 @@ export async function buildingSummary(buildingId, month, year, x = db) {
       flats: flats.length,
       expected: toRupees(expected),
       collectedMonth, pendingMonth,
-      availableBalance: toRupees(totalPayments + fundIn - realExpenses - fundOut),
+      availableBalance: toRupees(totalPayments + fundIn - realExpenses - fundOut - investedOutTotal + investedInTotal),
+      investedBalance: toRupees(investedBalanceR.s),
       cash: toRupees(buckets.cash),
       bank: toRupees(buckets.bank), otherBalance: toRupees(buckets.other),
       advance: toRupees(advTotal),
@@ -449,6 +478,7 @@ export async function buildingSummary(buildingId, month, year, x = db) {
         used: toRupees(creditApproved - creditAvailable),
       },
       outstandingDues: pendingMonth,
+      previousPendingTotal: toRupees(previousPendingTotal),
     },
     flatStates, series, recentPayments, recentExpenses,
   };
@@ -533,5 +563,254 @@ export async function flatLedger(flatId, x = db) {
     ).all(flatId)).map((a) => ({
       ...a, amount: toRupees(a.amount), category: a.rc_category, customTitle: a.rc_custom_title,
     })),
+    // Entirely separate pool from everything above — see the note atop
+    // previousDueSummary(). Present for every flat, but `active` is only
+    // true once an admin has entered a Previous Pending record for it.
+    previousDue: await previousDueSummary(flatId, x),
   };
+}
+
+// ---------- Previous Pending Dues: pre-existing arrears from before the
+// society adopted this software ----------
+//
+// Deliberately its own pool, walled off from monthState/recordPayment's
+// current-month due tracking and from the Resident Credit Ledger above —
+// see section 6 of the spec this was built from ("Current Due must remain
+// separate from Previous Due"). A flat's balance is just
+// SUM(previous_dues.amount) - SUM(previous_due_payments.amount); per-entry
+// paid/remaining is derived by walking entries oldest-first and consuming
+// that pool, the exact FIFO technique residentCreditSummary() already uses
+// for resident_credits/advance_tx above.
+
+export async function previousDueSummary(flatId, x = db) {
+  const entries = await x.prepare('SELECT * FROM previous_dues WHERE flat_id=? AND deleted=0 ORDER BY created_at, id').all(flatId);
+  const paidTotal = (await x.prepare(
+    'SELECT COALESCE(SUM(amount),0) s FROM previous_due_payments WHERE flat_id=? AND deleted=0'
+  ).get(flatId)).s;
+  let pool = paidTotal;
+  const rows = entries.map((e) => {
+    const paid = Math.min(e.amount, pool);
+    pool -= paid;
+    return {
+      id: e.id, category: e.category, months: e.months,
+      monthlyAmount: e.monthly_amount != null ? toRupees(e.monthly_amount) : null,
+      label: e.label, amount: toRupees(e.amount), paidAmount: toRupees(paid), remaining: toRupees(e.amount - paid),
+      status: paid === 0 ? 'active' : paid === e.amount ? 'cleared' : 'partially_paid',
+      notes: e.notes, createdAt: e.created_at,
+    };
+  });
+  const totalEntered = entries.reduce((s, e) => s + e.amount, 0);
+  return {
+    rows,
+    totals: {
+      entered: toRupees(totalEntered),
+      paid: toRupees(Math.min(paidTotal, totalEntered)),
+      remaining: toRupees(Math.max(totalEntered - paidTotal, 0)),
+    },
+    active: (totalEntered - paidTotal) > 0,
+  };
+}
+
+export async function recordPreviousDue(tx, p) {
+  const { flat_id, category, months = null, monthly_amount = null, label = null, amount: rawAmount, notes = null, actor_user_id = null } = p;
+  if (!['maintenance', 'other'].includes(category)) throw err('Invalid Previous Pending category');
+
+  const flat = await tx.prepare('SELECT * FROM flats WHERE id=?').get(flat_id);
+  if (!flat) throw err('Flat not found', 404);
+
+  let amount, monthsVal = null, monthlyAmountVal = null, labelVal = null;
+  if (category === 'maintenance') {
+    if (!(Number(months) > 0)) throw err('Enter the number of pending months');
+    if (!(Number(monthly_amount) > 0)) throw err('Enter the monthly maintenance amount');
+    monthsVal = Math.round(Number(months));
+    monthlyAmountVal = monthly_amount;
+    amount = monthsVal * monthlyAmountVal;
+  } else {
+    if (!label || !String(label).trim()) throw err('Enter a label for this Previous Pending entry');
+    if (!(Number(rawAmount) > 0)) throw err('Enter an amount greater than zero');
+    labelVal = String(label).trim();
+    amount = rawAmount;
+  }
+
+  const info = await tx.prepare(
+    `INSERT INTO previous_dues (building_id, flat_id, category, months, monthly_amount, label, amount, notes, created_by)
+     VALUES (?,?,?,?,?,?,?,?,?)`
+  ).run(flat.building_id, flat_id, category, monthsVal, monthlyAmountVal, labelVal, amount, notes, actor_user_id);
+
+  await audit(flat.building_id, 'create', 'previous_due', info.lastInsertRowid,
+    `Flat ${flat.number} Previous Pending — ${category === 'maintenance' ? `${monthsVal} months × ₹${toRupees(monthlyAmountVal)}` : labelVal}: ₹${toRupees(amount)}`,
+    actor_user_id, tx);
+
+  return { id: info.lastInsertRowid };
+}
+
+export async function deletePreviousDue(tx, id, actorUserId = null) {
+  const entry = await tx.prepare('SELECT * FROM previous_dues WHERE id=? AND deleted=0').get(id);
+  if (!entry) throw err('Previous Pending entry not found', 404);
+
+  const paidTotal = (await tx.prepare(
+    'SELECT COALESCE(SUM(amount),0) s FROM previous_due_payments WHERE flat_id=? AND deleted=0'
+  ).get(entry.flat_id)).s;
+  if (paidTotal > 0) {
+    throw err('This flat already has payments allocated toward Previous Pending — it can no longer be removed, only new entries can be added');
+  }
+
+  await tx.prepare('UPDATE previous_dues SET deleted=1 WHERE id=?').run(id);
+  await audit(entry.building_id, 'delete', 'previous_due', id,
+    `Removed Previous Pending entry of ₹${toRupees(entry.amount)}`, actorUserId, tx);
+}
+
+// Records one payment that may span both this month's current Maintenance
+// due and a flat's separate Previous Pending balance. Deliberately NOT
+// built on top of recordPayment — the current-due portion runs through the
+// exact same monthState/advance_tx/cascadeAdvance path recordPayment always
+// has, so a flat with previous_due_amount=0 (every flat without this
+// feature active) produces numerically identical payments/advance_tx rows
+// to before this feature existed. The previous-due portion never touches
+// applied_amount/advance_amount, so it can never leak into the
+// advance-cascade that carries overpayment into future months.
+export async function recordPaymentWithPreviousDue(tx, p) {
+  const {
+    flat_id, month, year, current_amount = 0, previous_due_amount = 0,
+    method, paid_on, notes, actor_user_id = null,
+  } = p;
+  const total = current_amount + previous_due_amount;
+  if (!(total > 0)) throw err('Enter a payment amount');
+  if (previous_due_amount < 0 || current_amount < 0) throw err('Amounts cannot be negative');
+
+  if (previous_due_amount > 0) {
+    const summary = await previousDueSummary(flat_id, tx);
+    const availablePaise = Math.round(summary.totals.remaining * 100);
+    if (previous_due_amount > availablePaise) throw err('Previous Pending allocation exceeds the remaining balance');
+  }
+
+  const st = await monthState(flat_id, month, year, tx);
+  const applied = Math.min(current_amount, st.due);
+  const advance = current_amount - applied;
+
+  const info = await tx.prepare(
+    `INSERT INTO payments (building_id, flat_id, month, year, amount, applied_amount, advance_amount, method, paid_on, notes)
+     VALUES (?,?,?,?,?,?,?,?,?,?)`
+  ).run(st.flat.building_id, flat_id, month, year, total, applied, advance, method, paid_on, notes || null);
+
+  let cascade = [];
+  if (advance > 0) {
+    await tx.prepare(
+      `INSERT INTO advance_tx (building_id, flat_id, type, amount, month, year, payment_id, notes)
+       VALUES (?,?,?,?,?,?,?,?)`
+    ).run(st.flat.building_id, flat_id, 'credit', advance, month, year, info.lastInsertRowid, 'Extra payment stored as advance');
+    cascade = await cascadeAdvance(tx, st.flat.building_id, flat_id, month, year, info.lastInsertRowid);
+  }
+
+  if (previous_due_amount > 0) {
+    await tx.prepare(
+      `INSERT INTO previous_due_payments (building_id, flat_id, payment_id, amount) VALUES (?,?,?,?)`
+    ).run(st.flat.building_id, flat_id, info.lastInsertRowid, previous_due_amount);
+  }
+
+  await audit(st.flat.building_id, 'create', 'payment', info.lastInsertRowid,
+    `Flat ${st.flat.number} ${month}/${year}: ₹${toRupees(total)} (current ₹${toRupees(applied)}` +
+    `${previous_due_amount ? `, previous pending ₹${toRupees(previous_due_amount)}` : ''}` +
+    `${advance ? `, advance ₹${toRupees(advance)}` : ''})`,
+    actor_user_id, tx);
+
+  return { id: info.lastInsertRowid, cascade, previousDueApplied: toRupees(previous_due_amount) };
+}
+
+// ---------- Investment Management (FDs / society investments) ----------
+//
+// Integrates with the existing Bank/Cash bucket math in buildingSummary()
+// above rather than tracking its own separate balance — see the
+// investOutRows/investInRows terms there. This section only owns the
+// investments table itself: creating, redeeming, deleting, and summarizing it.
+
+// Cheap, single-bucket balance check used only to validate a NEW investment
+// doesn't exceed what's actually available — mirrors how applyAdvance()
+// re-queries advanceBalance() fresh rather than trusting a passed-in
+// number, rather than calling the much larger buildingSummary() just for
+// one number.
+async function bucketBalance(buildingId, source, x = db) {
+  const methods = source === 'cash' ? ['cash'] : ['bank', 'upi', 'online'];
+  const placeholders = methods.map(() => '?').join(',');
+  const inFlow = (await x.prepare(
+    `SELECT COALESCE(SUM(amount),0) s FROM payments WHERE building_id=? AND deleted=0 AND method IN (${placeholders})`
+  ).get(buildingId, ...methods)).s
+    + (await x.prepare(
+      `SELECT COALESCE(SUM(amount),0) s FROM fund_tx WHERE building_id=? AND type='contribution' AND deleted=0 AND method IN (${placeholders})`
+    ).get(buildingId, ...methods)).s
+    + (await x.prepare(
+      `SELECT COALESCE(SUM(redeemed_amount),0) s FROM investments WHERE building_id=? AND status='redeemed' AND deleted=0 AND redeemed_source=?`
+    ).get(buildingId, source)).s;
+  const outFlow = (await x.prepare(
+    `SELECT COALESCE(SUM(amount),0) s FROM expenses WHERE building_id=? AND deleted=0 AND is_adjustment=0 AND method IN (${placeholders})`
+  ).get(buildingId, ...methods)).s
+    + (await x.prepare(
+      `SELECT COALESCE(SUM(amount),0) s FROM fund_tx WHERE building_id=? AND type='expense' AND deleted=0 AND method IN (${placeholders})`
+    ).get(buildingId, ...methods)).s
+    + (await x.prepare(
+      `SELECT COALESCE(SUM(amount),0) s FROM investments WHERE building_id=? AND is_previous=0 AND deleted=0 AND source=?`
+    ).get(buildingId, source)).s;
+  return inFlow - outFlow;
+}
+
+export async function investmentSummary(buildingId, x = db) {
+  const rows = (await x.prepare(
+    'SELECT * FROM investments WHERE building_id=? AND deleted=0 ORDER BY invested_on DESC, id DESC'
+  ).all(buildingId)).map((r) => ({
+    id: r.id, type: r.type, amount: toRupees(r.amount), source: r.source, investedOn: r.invested_on,
+    reference: r.reference, notes: r.notes, isPrevious: !!r.is_previous, status: r.status,
+    redeemedAmount: r.redeemed_amount != null ? toRupees(r.redeemed_amount) : null,
+    redeemedOn: r.redeemed_on, redeemedSource: r.redeemed_source, redeemedNotes: r.redeemed_notes,
+  }));
+  const invested = rows.filter((r) => r.status === 'active').reduce((s, r) => s + r.amount, 0);
+  return { rows, totals: { invested } };
+}
+
+export async function recordInvestment(tx, p) {
+  const {
+    building_id, type, amount, source, invested_on, reference = null, notes = null,
+    is_previous = false, actor_user_id = null,
+  } = p;
+  if (!['bank', 'cash'].includes(source)) throw err('Invalid investment source');
+  if (!type || !String(type).trim()) throw err('Enter an investment type/purpose');
+  if (!(amount > 0)) throw err('Enter an investment amount greater than zero');
+
+  if (!is_previous) {
+    const available = await bucketBalance(building_id, source, tx);
+    if (amount > available) throw err(`Investment exceeds the available ${source} balance`);
+  }
+
+  const info = await tx.prepare(
+    `INSERT INTO investments (building_id, type, amount, source, invested_on, reference, notes, is_previous, created_by)
+     VALUES (?,?,?,?,?,?,?,?,?)`
+  ).run(building_id, type, amount, source, invested_on, reference, notes, is_previous ? 1 : 0, actor_user_id);
+
+  await audit(building_id, 'create', 'investment', info.lastInsertRowid,
+    `${is_previous ? 'Previous investment' : 'New investment'} — ${type}: ₹${toRupees(amount)} (${source})`, actor_user_id, tx);
+  return { id: info.lastInsertRowid };
+}
+
+export async function redeemInvestment(tx, p) {
+  const { id, redeemed_amount, redeemed_on, redeemed_source, redeemed_notes = null, actor_user_id = null } = p;
+  const inv = await tx.prepare('SELECT * FROM investments WHERE id=? AND deleted=0').get(id);
+  if (!inv) throw err('Investment not found', 404);
+  if (inv.status !== 'active') throw err('This investment has already been redeemed');
+  if (!['bank', 'cash'].includes(redeemed_source)) throw err('Invalid redemption destination');
+  if (!(redeemed_amount > 0)) throw err('Enter a redemption amount greater than zero');
+
+  await tx.prepare(
+    `UPDATE investments SET status='redeemed', redeemed_amount=?, redeemed_on=?, redeemed_source=?, redeemed_notes=? WHERE id=?`
+  ).run(redeemed_amount, redeemed_on, redeemed_source, redeemed_notes, id);
+
+  await audit(inv.building_id, 'redeem', 'investment', id,
+    `Redeemed ${inv.type} — ₹${toRupees(redeemed_amount)} returned to ${redeemed_source}`, actor_user_id, tx);
+}
+
+export async function deleteInvestment(tx, id, actorUserId = null) {
+  const inv = await tx.prepare('SELECT * FROM investments WHERE id=? AND deleted=0').get(id);
+  if (!inv) throw err('Investment not found', 404);
+  if (inv.status === 'redeemed') throw err('This investment has already been redeemed and can no longer be removed');
+
+  await tx.prepare('UPDATE investments SET deleted=1 WHERE id=?').run(id);
+  await audit(inv.building_id, 'delete', 'investment', id, `Removed ${inv.type} — ₹${toRupees(inv.amount)}`, actorUserId, tx);
 }

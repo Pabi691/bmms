@@ -65,7 +65,7 @@ db.transaction = async () => {
 // of the serverless function re-executed the full schema plus ~17
 // sequential migration-check round trips against Turso before it could
 // serve even one request, which is why the deployed app felt slow to load.
-const SCHEMA_VERSION = '1';
+const SCHEMA_VERSION = '3';
 const versionRow = await client.execute("SELECT value FROM _schema_meta WHERE key='schema_version'").catch(() => null);
 if (versionRow?.rows[0]?.value !== SCHEMA_VERSION) {
   const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');

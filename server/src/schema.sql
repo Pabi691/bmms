@@ -287,6 +287,67 @@ CREATE INDEX IF NOT EXISTS idx_residentcredits_flat       ON resident_credits(fl
 CREATE INDEX IF NOT EXISTS idx_residentcredits_building   ON resident_credits(building_id, deleted);
 CREATE INDEX IF NOT EXISTS idx_residentcredits_submission ON resident_credits(submission_id);
 
+-- ---------- Previous Pending Dues (pre-existing arrears from before the
+-- society adopted this software) — deliberately its own pool, entirely
+-- separate from monthState/payments' current-month due tracking. See
+-- previousDueSummary()/recordPaymentWithPreviousDue() in finance.js. ----------
+CREATE TABLE IF NOT EXISTS previous_dues (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  building_id    INTEGER NOT NULL REFERENCES buildings(id) ON DELETE CASCADE,
+  flat_id        INTEGER NOT NULL REFERENCES flats(id) ON DELETE CASCADE,
+  category       TEXT NOT NULL CHECK (category IN ('maintenance','other')),
+  months         INTEGER,           -- maintenance only: number of pending months
+  monthly_amount INTEGER,           -- maintenance only: rate used for months*rate, paise
+  label          TEXT,              -- other only: free-text description, e.g. "Lift Maintenance"
+  amount         INTEGER NOT NULL CHECK (amount > 0),  -- paise, total for this entry
+  notes          TEXT,
+  created_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  deleted        INTEGER NOT NULL DEFAULT 0,
+  created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_prevdues_flat     ON previous_dues(flat_id, deleted);
+CREATE INDEX IF NOT EXISTS idx_prevdues_building  ON previous_dues(building_id, deleted);
+
+-- Pooled ledger of money allocated toward a flat's previous_dues balance —
+-- mirrors how advance_tx pools against resident_credits. Consumed FIFO,
+-- oldest previous_dues entry first (see previousDueSummary()).
+CREATE TABLE IF NOT EXISTS previous_due_payments (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  building_id  INTEGER NOT NULL REFERENCES buildings(id) ON DELETE CASCADE,
+  flat_id      INTEGER NOT NULL REFERENCES flats(id) ON DELETE CASCADE,
+  payment_id   INTEGER REFERENCES payments(id) ON DELETE CASCADE,
+  amount       INTEGER NOT NULL CHECK (amount > 0),  -- paise, portion of that payment allocated here
+  deleted      INTEGER NOT NULL DEFAULT 0,
+  created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_prevduepay_flat    ON previous_due_payments(flat_id, deleted);
+CREATE INDEX IF NOT EXISTS idx_prevduepay_payment ON previous_due_payments(payment_id);
+
+-- ---------- Investment Management (FDs / society investments) ----------
+-- One row per investment — unlike Previous Pending Dues this is a single
+-- lump sum in and (at most) a single lump sum out, so no pooled ledger is
+-- needed. See recordInvestment()/redeemInvestment() in finance.js.
+CREATE TABLE IF NOT EXISTS investments (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  building_id      INTEGER NOT NULL REFERENCES buildings(id) ON DELETE CASCADE,
+  type             TEXT NOT NULL,
+  amount           INTEGER NOT NULL CHECK (amount > 0),
+  source           TEXT NOT NULL CHECK (source IN ('bank','cash')),
+  invested_on      TEXT NOT NULL,
+  reference        TEXT,
+  notes            TEXT,
+  is_previous      INTEGER NOT NULL DEFAULT 0,
+  status           TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','redeemed')),
+  redeemed_amount  INTEGER,
+  redeemed_on      TEXT,
+  redeemed_source  TEXT CHECK (redeemed_source IN ('bank','cash')),
+  redeemed_notes   TEXT,
+  created_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  deleted          INTEGER NOT NULL DEFAULT 0,
+  created_at       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_investments_building ON investments(building_id, deleted);
+
 CREATE TABLE IF NOT EXISTS notices (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   building_id  INTEGER NOT NULL REFERENCES buildings(id) ON DELETE CASCADE,

@@ -152,7 +152,7 @@ export default function Buildings() {
               <div className="bc-stats">
                 <div><div className="lbl">Available balance</div><div className="val">{inr(b.stats.availableBalance)}</div></div>
                 <div><div className="lbl">This month collected</div><div className="val" style={{ color: 'var(--ok)' }}>{inr(b.stats.collectedMonth)}</div></div>
-                <div><div className="lbl">Pending</div><div className="val" style={{ color: b.stats.pendingMonth > 0 ? 'var(--bad)' : 'var(--ok)' }}>{inr(b.stats.pendingMonth)}</div></div>
+                <div><div className="lbl">Pending</div><div className="val" style={{ color: (b.stats.pendingMonth + b.stats.previousPendingTotal) > 0 ? 'var(--bad)' : 'var(--ok)' }}>{inr(b.stats.pendingMonth + b.stats.previousPendingTotal)}</div></div>
                 <div><div className="lbl">Emergency fund</div><div className="val" style={{ color: 'var(--adv)' }}>{inr(b.stats.emergencyFund)}</div></div>
               </div>
               <div className="bc-admin">

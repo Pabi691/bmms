@@ -8,6 +8,7 @@ const ADJUSTMENT_LABELS = { none: 'None', electricity: 'Electricity', internet: 
 const blankPay = {
   flat_id: '', month: now.getMonth() + 1, year: now.getFullYear(), amount: '', method: 'cash', paid_on: today(), notes: '',
   adjustment_category: 'none', adjustment_amount: '', adjustment_custom_title: '',
+  previous_due_amount: '',
 };
 
 export default function Payments() {
@@ -19,6 +20,7 @@ export default function Payments() {
   const [form, setForm] = useState(params.get('add') ? { ...blankPay } : null);
   const [adv, setAdv] = useState(null); // advance apply form
   const [state, setState] = useState(null); // live month state preview
+  const [previousDue, setPreviousDue] = useState(null); // live Previous Pending summary for the selected flat (only when form is open)
   const [filter, setFilter] = useState({ month: '', year: '', from: '', to: '' });
   const toast = useToast();
 
@@ -46,7 +48,15 @@ export default function Payments() {
     api.get(`/flats/${f.flat_id}/month-state?month=${f.month}&year=${f.year}`).then(setState).catch(() => setState(null));
   }, [form?.flat_id, form?.month, form?.year, adv?.flat_id, adv?.month, adv?.year]);
 
-  const close = () => { setForm(null); setAdv(null); params.delete('add'); setParams(params); };
+  // Previous Pending only ever matters on the payment form (not "apply
+  // advance"), and only for flats an admin has actually flagged — for
+  // every other flat this stays null and the allocation field never renders.
+  useEffect(() => {
+    if (!form?.flat_id) { setPreviousDue(null); return; }
+    api.get(`/flats/${form.flat_id}/previous-dues`).then((d) => setPreviousDue(d.active ? d : null)).catch(() => setPreviousDue(null));
+  }, [form?.flat_id]);
+
+  const close = () => { setForm(null); setAdv(null); setPreviousDue(null); params.delete('add'); setParams(params); };
 
   const save = async (e) => {
     e.preventDefault();
@@ -55,8 +65,11 @@ export default function Payments() {
         if (!(Number(form.adjustment_amount) > 0)) throw new Error('Enter an adjustment amount');
         if (form.adjustment_category === 'custom' && !form.adjustment_custom_title.trim()) throw new Error('Custom Expense Name is required');
       }
-      if (!(Number(form.amount) > 0) && !(form.adjustment_category !== 'none' && Number(form.adjustment_amount) > 0)) {
-        throw new Error('Enter an amount paid to the society or an adjustment amount');
+      if (Number(form.previous_due_amount) > 0 && previousDue && Number(form.previous_due_amount) > previousDue.totals.remaining) {
+        throw new Error('Previous Pending allocation exceeds the remaining balance');
+      }
+      if (!(Number(form.amount) > 0) && !(form.adjustment_category !== 'none' && Number(form.adjustment_amount) > 0) && !(Number(form.previous_due_amount) > 0)) {
+        throw new Error('Enter an amount paid to the society, an adjustment amount, or a Previous Pending allocation');
       }
       const body = {
         flat_id: form.flat_id, month: form.month, year: form.year, method: form.method, paid_on: form.paid_on, notes: form.notes,
@@ -64,6 +77,7 @@ export default function Payments() {
         adjustment_category: form.adjustment_category !== 'none' ? form.adjustment_category : undefined,
         adjustment_amount: form.adjustment_category !== 'none' ? form.adjustment_amount : undefined,
         adjustment_custom_title: form.adjustment_category === 'custom' ? form.adjustment_custom_title : undefined,
+        previous_due_amount: !form.id && Number(form.previous_due_amount) > 0 ? form.previous_due_amount : undefined,
       };
       const r = form.id ? await api.put(`/payments/${form.id}`, body) : await api.post('/payments', body);
       if (form.id) {
@@ -74,6 +88,7 @@ export default function Payments() {
         } else toast('Payment saved');
       } else {
         const parts = [];
+        if (r.payment?.previousDueApplied > 0) parts.push(`${inr(r.payment.previousDueApplied)} applied to Previous Pending`);
         if (r.payment?.cascade?.length) parts.push(`bank overpayment auto-applied to ${r.payment.cascade.map((c) => `${MONTHS[c.month - 1].slice(0, 3)} ${c.year}`).join(', ')}`);
         if (r.credit?.cascade?.length) parts.push(`credit auto-applied to ${r.credit.cascade.map((c) => `${MONTHS[c.month - 1].slice(0, 3)} ${c.year}`).join(', ')}`);
         toast(parts.length ? `Payment saved — ${parts.join('; ')}` : 'Payment saved');
@@ -236,6 +251,20 @@ export default function Payments() {
             )}
             <div className="field"><label>Amount paid to society (₹)</label>
               <input type="number" min="0" step="0.01" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></div>
+
+            {/* Only ever rendered for a flat an admin has explicitly flagged
+                with a Previous Pending entry (Flats.jsx) — every other flat's
+                form looks exactly as it always has. */}
+            {!form.id && previousDue && (
+              <div className="glass" style={{ padding: 12, marginBottom: 12, borderColor: 'var(--adv)' }}>
+                <div style={{ fontSize: 13, marginBottom: 8 }}>
+                  This flat has <b className="num">{inr(previousDue.totals.remaining)}</b> Previous Pending remaining.
+                </div>
+                <div className="field" style={{ margin: 0 }}><label>Allocate to Previous Pending (₹)</label>
+                  <input type="number" min="0" max={previousDue.totals.remaining} step="0.01"
+                    value={form.previous_due_amount} onChange={(e) => setForm({ ...form, previous_due_amount: e.target.value })} /></div>
+              </div>
+            )}
 
             {!form.id && (
               <>
